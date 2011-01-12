@@ -1,2 +1,2 @@
-__author__ = 'odeskps'
-__version__ = '0.9.4.1'
+__author__ = 'oDesk, www.odesk.com'
+__version__ = '0.9.4.2'
