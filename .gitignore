@@ -1,11 +1,6 @@
-backups/
-build/
-var/
-virtenv
-django_wsgi.py
-local_settings.py
-pip-log.txt
-sqlite.db
+dist/
+django-fabfile-*/
+django_fabfile.egg-info/
 *.*~
 *.bak
 *.log

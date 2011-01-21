@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 from django_fabfile import __author__, __doc__, __version__
 
@@ -9,8 +9,9 @@ setup(
     description='Deployment Django projects with Fabric.',
     long_description=__doc__,
     author=__author__,
-    maintainer='Yuri Yurevich',
-    include_package_data=True,
+    maintainer='Yury Yurevich',
+    packages=find_packages(),
+    include_package_data=False,
     zip_safe=True,
     # Get more strings from http://www.python.org/pypi?:action=list_classifiers
     classifiers=[
