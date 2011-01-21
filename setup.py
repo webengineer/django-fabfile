@@ -1,15 +1,17 @@
 from setuptools import setup, find_packages
 
-from django_fabfile import __author__, __doc__, __version__
+from django_fabfile import __doc__, __version__
 
 
 setup(
     name='django-fabfile',
+    url='http://redmine.odeskps.com/projects/django-fabfile',
+    download_url='http://pypi.odeskps.com/django-fabfile',
     version=__version__,
     description='Deployment Django projects with Fabric.',
     long_description=__doc__,
-    author=__author__,
     maintainer='Yury Yurevich',
+    maintainer_email='yyurevich@jellycrystal.com',
     packages=find_packages(),
     include_package_data=False,
     zip_safe=True,
