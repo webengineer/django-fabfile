@@ -34,16 +34,16 @@ Required settings should be placed in project settings::
             'ec2_instance': 'i-d86a73b0',
             'ip': '204.236.235.116',
             'proj_dir': '/var/www/ott/mysite',
-            'virtualenv_dir': 'virtenv',
+            'virtualenv_dir': 've',
     }
     PRODUCTION = {
             'hostname': 'translation.odesk.com',
             'ec2_instance': 'i-67ce0b0c',
             'ip': '184.73.237.111',
             'proj_dir': '/var/www/ott/mysite',
-            'virtualenv_dir': 'virtenv',
+            'virtualenv_dir': 've',
     }
-    VIRTUALENV_DIR = 'virtenv'
+    VIRTUALENV_DIR = 've'
 
     # Project repository access key.
     SSH_KEYFILE = '/home/user/.ssh/id_user'
@@ -96,9 +96,8 @@ WB_API_URL='http://api.websitepulse.com/textserver.php'
 env.key_filename = SSH_KEYFILE
 env.user = 'odeskps'
 
-VIRTUALENV = '. %s/bin/activate &&' % VIRTUALENV_DIR
-SUDO_VIRTUALENV = '%s export %s &&' % (VIRTUALENV, SUDO_EXPORT)
-MANAGE = '%s ./manage.py ' % SUDO_VIRTUALENV
+SUDO_VIRTUALENV = '%s/bin/activate && %s ' % (VIRTUALENV_DIR, SUDO_EXPORT)
+MANAGE = './manage.py '
 
 
 def _check_git_branch_name(name):
@@ -129,17 +128,6 @@ def pull_updates():
     local('git fetch %s staging:staging' % PULL_REPO)
     local('git checkout production')
     local('git pull %s production' % PULL_REPO)
-
-
-def upgrade_virtualenv():
-    """Installs and upgrade virtualenv according to requirement file."""
-    with settings(warn_only=True):
-        install = local('pip install virtualenv')
-    if install.failed:
-        local('sudo pip install virtualenv', capture=False)
-    if not _exists(VIRTUALENV_DIR):
-        local('virtualenv %s' % VIRTUALENV_DIR)
-    local(VIRTUALENV + 'pip install -r requirements.txt', capture=False)
 
 
 def _disable_websitepulse_alerts(suspend=True):
@@ -175,16 +163,16 @@ def prepare_deploy():
     if merge.failed:
         local('git mergetool', capture=False)
         local('git commit', capture=False)
-    upgrade_virtualenv()
+    local('python bootstrap.py --upgrade')
     # Run tests.
-    local(VIRTUALENV + './manage.py clean_pyc')
-    local(VIRTUALENV + './manage.py test --settings=test_settings ' +
-          ' '.join(APPS_TO_TEST), capture=False)
-    local(VIRTUALENV + './manage.py dryrun', capture=False)
-    local(VIRTUALENV + './manage.py syncdb --noinput', capture = False)
-    local(VIRTUALENV + './manage.py migrate --noinput', capture = False)
+    local(MANAGE + 'clean_pyc')
+    local(MANAGE + 'test --settings=test_settings '
+          + ' '.join(APPS_TO_TEST), capture=False)
+    local(MANAGE + 'dryrun', capture=False)
+    local(MANAGE + 'syncdb --noinput', capture = False)
+    local(MANAGE + 'migrate --noinput', capture = False)
     if confirm('Do you like to run healthcheck?', default=False):
-        local(VIRTUALENV + './manage.py healthcheck', capture=False)
+        local(MANAGE + 'healthcheck', capture=False)
 
 
 @hosts(PRODUCTION['hostname'])
@@ -192,8 +180,8 @@ def backup_production():
     """Create backup dump and transfer to the STAGING server."""
     with cd(PRODUCTION['proj_dir']):
         run(SUDO_VIRTUALENV + 'bin/dump.sh', pty=True)
-        run('bin/backup_db.sh', pty=True)
-        run('bin/xfer_backups.sh', pty=True)
+        run(SUDO_VIRTUALENV + 'bin/backup_db.sh', pty=True)
+        run(SUDO_VIRTUALENV + 'bin/xfer_backups.sh', pty=True)
 
 
 def _run_pull():
@@ -204,13 +192,7 @@ def _run_pull():
         run('git checkout staging', pty=True)
     run('git pull', pty=True)
     # Setup virtualenv.
-    run('pip install virtualenv', pty=True)
-    try:
-        run('ls %s' % VIRTUALENV_DIR, pty=True)
-    except:
-        run('virtualenv %s' % VIRTUALENV_DIR, pty=True)
-    run(SUDO_VIRTUALENV + 'pip install --log=.pip/pip.log -r requirements.txt',
-         pty=True)
+    run('python bootstrap.py')
     for log_file in LOGS.values():
         if not _exists(log_file):
             run('touch %s' % log_file, pty=True)
