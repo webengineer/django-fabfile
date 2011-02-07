@@ -96,7 +96,7 @@ WB_API_URL='http://api.websitepulse.com/textserver.php'
 env.key_filename = SSH_KEYFILE
 env.user = 'odeskps'
 
-SUDO_VIRTUALENV = '%s/bin/activate && %s ' % (VIRTUALENV_DIR, SUDO_EXPORT)
+SUDO_VIRTUALENV = 'source %s/bin/activate && %s ' % (VIRTUALENV_DIR, SUDO_EXPORT)
 MANAGE = './manage.py '
 
 
