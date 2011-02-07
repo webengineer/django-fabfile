@@ -163,7 +163,7 @@ def prepare_deploy():
     if merge.failed:
         local('git mergetool', capture=False)
         local('git commit', capture=False)
-    local('python bootstrap.py --upgrade')
+    local('python bootstrap.py')
     # Run tests.
     local(MANAGE + 'clean_pyc')
     local(MANAGE + 'test --settings=test_settings '
