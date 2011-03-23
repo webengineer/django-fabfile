@@ -179,7 +179,6 @@ def prepare_deploy():
 def backup_production():
     """Create backup dump and transfer to the STAGING server."""
     with cd(PRODUCTION['proj_dir']):
-        run(SUDO_VIRTUALENV + 'bin/dump.sh', pty=True)
         run(SUDO_VIRTUALENV + 'bin/backup_db.sh', pty=True)
         run(SUDO_VIRTUALENV + 'bin/xfer_backups.sh', pty=True)
 
