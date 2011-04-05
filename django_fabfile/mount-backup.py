@@ -10,19 +10,13 @@ and currently covers the following two cases:
    is attached to that temporary server. For us-west, the script can be run anywhere
    there exists a python environment and an appropriate version of boto.
 
-This script uses boto features that are only available in newer versions of boto,
-circa. January 2011.
+Use configuration file ~/.boto for storing your credentials as described
+at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 '''
 
 import boto.ec2 # AWS API
 import os   # working with local directories.
 import time # need to wait for some things (time.sleep)
-
-# TODO Add opportunity to use configuration file ~/.boto as described at
-# http://code.google.com/p/boto/wiki/BotoConfig#Credentials
-key = "OVERRIDE ME IN LOCAL SETTINGS"
-sk = "OVERRIDE ME IN LOCAL SETTINGS"
-ownerID = 'OVERRIDE ME IN LOCAL SETTINGS' # for this Amazon AWS account
 
 device = '/dev/sdm' # where the backup volume will be attached to the mountOnServer
 
@@ -56,11 +50,7 @@ while region == ' ':
 # Authenticate to an Amazon AWS region
 #################################################
 
-conn = boto.ec2.connect_to_region(
-	region,
-	aws_access_key_id = key,
-	aws_secret_access_key = sk,
-)
+conn = boto.ec2.connect_to_region(region)
 
 #################################################
 # us-west specific: identify key and create temporary server
@@ -156,11 +146,7 @@ else:
 	print '\nYour backup will be mounted on the ' + mountOnServerLabel + \
 		  ' server, instance ID ' + mountOnServerID
 
-	#################################################
-	# snapshot ID is known, or it must be chosen.....
-	#################################################
-
-	snapshots = conn.get_all_snapshots(owner=ownerID)
+	snapshots = conn.get_all_snapshots(owner='self')
 
 	res = ' '
 	while res != 'yes' and res != 'no':
