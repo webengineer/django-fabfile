@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 '''
 This script mounts an AWS EBS-store server backup snapshot for inspection,
 and currently covers the following two cases:
@@ -14,349 +12,265 @@ Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 '''
 
-import boto.ec2 # AWS API
-import os   # working with local directories.
-import time # need to wait for some things (time.sleep)
+from ConfigParser import ConfigParser as _ConfigParser
+from pprint import PrettyPrinter as _PrettyPrinter
+from pydoc import pager as _pager
+from time import sleep as _sleep
+from traceback import print_exc
+from warnings import warn as _warn
 
-device = '/dev/sdm' # where the backup volume will be attached to the mountOnServer
+from boto.ec2 import (connect_to_region as _connect_to_region,
+                      regions as _regions)
+from boto.exception import EC2ResponseError as _EC2ResponseError
+from fabric.api import env, prompt, sudo
 
-print '\nThis script will mount a server backup in your Amazon AWS account.\n'
 
-#################################################
-# Choose your region (where the server whose backup you wish to see is running)
-#################################################
+config_file = 'fabfile.cfg'
 
-region = ' '
-while region == ' ':
+def _config_get_or_set(filename, option, section='DEFAULT', default_value=None,
+                       info=None):
+    """Open config `filename` and try to get `option` value.
 
-	print "1. us-east-1"
-	print "2. us-west-1"
+    If no `default_value` provided, prompt user with `info`."""
+    config = _ConfigParser()
+    config.read(filename)
+    if not config.has_option(section, option):
+        if not section in config.sections(): config.add_section(section)
+        if default_value is not None:
+            config.set(section, option, default_value)
+        else:
+            value = prompt(info or 'Please enter {0} for {1}'.format(option,
+                                                                     section))
+            config.set(section, option, value)
+        with open(filename, 'w') as f_p:
+            config.write(f_p)
+    return config.get(section, option)
 
-	res = raw_input('In which region is the server / backup that you would like to look at?: ')
-	res = res.strip() # remove whitspace
+# Where the backup volume should be attached.
+username = _config_get_or_set(config_file, 'username', default_value='ubuntu')
+device = _config_get_or_set(config_file, 'device', default_value='/dev/sdm')
+mountpoint = _config_get_or_set(config_file, 'mountpoint',
+                               default_value='/media/snapshot')
 
-	if res == '1':
-		region = 'us-east-1'
-		mountOnServerLabel = 'infrastructure' # server the backup volume will be mounted on.
-		mountOnServerID = 'i-a09a13cd'
-	elif res == '2':
-		region = 'us-west-1'
-		mountOnServerLabel = 'temporary' # server the backup volume will be mounted on.
-		mountOnServerID = 'none yet'
-	else:
-		print '\nIncorrect input, please try again:'
 
-#################################################
-# Authenticate to an Amazon AWS region
-#################################################
+def create_temp_instance(region='us-east-1'):
 
-conn = boto.ec2.connect_to_region(region)
+    """Create temporary server.
 
-#################################################
-# us-west specific: identify key and create temporary server
-#################################################
+    Return reservation with created instance."""
 
-if region == 'us-west-1':
-	
-	print '\nYou have chosen ' + region + ', which has no designated server for mounting backups.'
-	print 'This script will now create a temporary server for the purposes of accessing your selected backup.'
-	print '(This temporary server will be deleted automatically at the end of the process.)'
-	
-	print '\nYou will need to have already created a login key in the ' + region + ' region.'
-	print 'Here are the list of keys that currently exist in the ' + region + ' region:\n'
-	
-	keys = conn.get_all_key_pairs()
-	for key in keys:
-		print key.name
-	
-	success = False
-	while success == False:
-		res = raw_input('\nPaste your key (from the list above) here: ')
-		res = res.strip() # remove whitspace
-		for key in keys:
-			if res == key.name:
-				yourkey = key
-				success = True
+    info = 'Please enter your login key in the {0} region'.format(region)
+    key_pair = _config_get_or_set(config_file, 'key_pair', region, info=info)
+    _config_get_or_set(config_file, 'key_filename', region,
+                       info='and private key location')
 
-	print '\nYou have selected key: ' + yourkey.name
-	print 'We will now start a temporary server in ' + region + ' using this key....'
-	
-	# This image ID is taken from http://uec-images.ubuntu.com/maverick/current/
-	# It probably should be updated with something newer once a year or so.
-	imageID = 'ami-d194c494'
-	images = conn.get_all_images(image_ids=imageID)
-	
-	for image in images:
-		if image.id == imageID:
-			selectedImage = image
+    config = _ConfigParser()
+    config.read(config_file)
+    ami = config.get(region, 'ami') if config.has_option(region, 'ami') else ''
+    image = None
+    while not image:
+        try:
+            image = _connect_to_region(region).get_image(ami)
+        except _EC2ResponseError:
+            info = (
+                'Please enter fresh ami ID listed at '
+                'http://uec-images.ubuntu.com/maverick/current/ for ' +
+                region + ' and t1.micro type')
+            ami = prompt(info)
+            config.set(region, 'ami', ami)
+            with open(config_file, 'w') as f_p:
+                config.write(f_p)
 
-	try:
-		print 'We will use Ubuntu AMI ' + selectedImage.id + ' for this server....'
-	except:
-		print '\nSorry, could not find the specified image ' + imageID + ' in the list of available images!'
-		raise
-	
-	reservation = selectedImage.run(
-		key_name=yourkey.name,
-		instance_type='t1.micro'
-	)
-	
-	mountOnServerID = reservation.instances[0].id
-	mountOnServer = reservation.instances[0]
-	
-	state = ' '
-	while state != 'running': # wait for the server to finish starting up
-		time.sleep(4)
-		mountOnServer.update()
-		state = mountOnServer.state
-		print 'Waiting: ' + mountOnServerLabel + ' server state is still ' + state
+    reservation = image.run(key_name=key_pair, instance_type='t1.micro',
+                            placement=image.connection.get_all_zones()[0].name)
+    print ('{res.instances[0].id} instance created in {res.id} reservation at '
+           '{region} region'.format(res=reservation, region=region))
 
-#################################################
-# Get all available instances in the chosen region
-#################################################
+    assert len(reservation.instances) == 1, 'More than 1 instances created'
 
-print '\nFirst get all instances (servers) running in this region:\n'
+    return reservation.instances[0]
 
-instances = []
-for r in conn.get_all_instances():
-	instances.extend(r.instances)
 
-print "Volume ID\tInstance ID\tState\tInstance Type\tKey Name\tLocation\tIP Address\n"
+def _prompt_to_select(choices, query='Select from', paging=False):
 
-found = False
-for item in instances:
-	
-	try:
-		volumeID = item.block_device_mapping['/dev/sda1'].volume_id
-	except:
-		volumeID = 'None'
-	
-	print '%s\t%s\t%s\t%s\t%s\t%s\t%s' % \
-	(volumeID,  item.id, item.state,\
-	 item.instance_type, item.key_name, item.placement, item.ip_address)
-	
-	if item.id == mountOnServerID:
-		mountOnServer = item
-		found = True
+    """prompt to select an option from provided choices.
 
-if found == False:
-	print '\nI cannot find the ' + mountOnServerLabel + ' server in this list, exiting.....'
-else:
+    choices: list or dict. If dict, then keys will be selected.
+    paging: render long list with pagination.
 
-	print '\nYour backup will be mounted on the ' + mountOnServerLabel + \
-		  ' server, instance ID ' + mountOnServerID
+    return solely possible value instantly."""
 
-	snapshots = conn.get_all_snapshots(owner='self')
+    keys = list(choices)
+    while keys.count(None):
+        keys.pop(choices.index(None))    # Remove empty values.
+    assert len(keys), 'No choices provided'
 
-	res = ' '
-	while res != 'yes' and res != 'no':
-		res = raw_input('\nDo you know exactly which volume snapshot you would like to mount (yes or no)?: ')
-		res = res.strip() # remove whitspace
-	
-	#################################################
-	# snapshot / backup ID is already known:
-	#################################################
+    if len(keys) == 1: return keys[0]
 
-	if res == 'yes': # let the user enter a snapshot ID directly....
-		
-		correct = ' '
-		while correct != 'y':
-		
-			matched = ' '
-			while matched != 'yes':
-		
-				print ''
-				prompt = 'Enter the snapshot ID that you wish to mount here: '
-				chosenSnapshotID = raw_input(prompt)
-				chosenSnapshotID = chosenSnapshotID.strip() # remove whitspace
-		
-				for item in snapshots:
-					if chosenSnapshotID == item.id:
-						chosenSnapshot = item
-						matched = 'yes'
-		
-				if matched != 'yes':
-					print 'Sorry, cannot find your snapshot in the list. Please try again.'
-		
-			print '\nYou have chosen:'
-			print '%s\t%s\t%s\t%s' % \
-				(chosenSnapshot.id, chosenSnapshot.volume_id, \
-				 chosenSnapshot.start_time, chosenSnapshot.description)
-	
-			correct = raw_input('Is this correct (y or n)?: ')
-			correct = correct.strip() # remove whitspace
-		
-	#################################################
-	# Snapshot ID is not known in advance, select a server:
-	#################################################
+    picked = None
+    while not picked in keys:
+        if paging:
+            pp = _PrettyPrinter()
+            _pager(pp.pformat(choices))
+            text = 'Enter your choice or press Return to view options again'
+        else:
+            text = '{query} {choices}'.format(query=query, choices=choices)
+        picked = prompt(text)
+    return picked
 
-	else: # prompt the user to select server, then show him the snapshots for that server....
 
-		chosenInstance = ' '
-		while chosenInstance == ' ':
-	
-			print ''
-			chosenVolumeID = raw_input('From the above list, paste the volume ID of the instance whose backups you wish to access: ')
-			chosenVolumeID = chosenVolumeID.strip() # remove whitspace
-	
-			for item in instances:
-				
-				try: # some instances do not have volumes, we only care about those that do
-					if chosenVolumeID == item.block_device_mapping['/dev/sda1'].volume_id:
-						chosenInstance = item
-				except:
-					continue
-			
-			if chosenInstance == ' ':
-				print '\nThe volume ID you entered does match any of the available instances.\nPlease try again:'
-	
-		print '\nThis is the instance you have chosen:'
-		print '%s\t%s\t%s\t%s\t%s\t%s' % \
-			(chosenInstance.block_device_mapping['/dev/sda1'].volume_id, chosenInstance.id, \
-			 chosenInstance.state, chosenInstance.instance_type, \
-			 chosenInstance.key_name, chosenInstance.ip_address)
-	
-		#################################################
-		# List the volume snapshots that match the chosen Volume ID
-		#################################################
-	
-		print "\nSnapshot ID\tVolume ID\tDate\t\t\t\tDescription\n"
-	
-		for item in snapshots:
-			if item.volume_id == chosenVolumeID:
-				defaultSnapshot = item # AWS by default lists from oldest to newest, so the last one will be newest
-				print '%s\t%s\t%s\t%s' % \
-				(item.id, item.volume_id, item.start_time, item.description)
-	
-		#################################################
-		# Choose which snapshot to mount
-		#################################################
-	
-		correct = 'n'
-		matched = ' '
-		while correct != 'y':
-	
-			print ''
-			prompt = 'Paste the snapshot ID that you wish to mount (default = %s): ' % defaultSnapshot.id
-			chosenSnapshotID = raw_input(prompt)
-			chosenSnapshotID = chosenSnapshotID.strip() # remove whitspace
-	
-			for item in snapshots:
-				if chosenSnapshotID == item.id:
-					chosenSnapshot = item
-					matched = 'yes'
-	
-			if matched != 'yes':
-				chosenSnapshot = defaultSnapshot
-	
-			print '\nYou have chosen:'
-			print '%s\t%s\t%s\t%s' % \
-				(chosenSnapshot.id, chosenSnapshot.volume_id, \
-				 chosenSnapshot.start_time, chosenSnapshot.description)
-	
-			correct = raw_input('Is this correct (y or n)?: ')
-			correct = correct.strip() # remove whitspace
+def _get_all_instances(region=None, id_only=False):
+    if not region:
+        _warn('There is no guarantee of instance id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    connections = (_connect_to_region(reg) for reg in reg_names)
+    for con in connections:
+        for res in con.get_all_instances():
+            for inst in res.instances:
+                yield inst.id if id_only else inst
 
-	#################################################
-	# Create a volume from the selected snapshot and attach it to the designated server
-	#################################################
+def _get_all_snapshots(region=None, id_only=False):
+    if not region:
+        _warn('There is no guarantee of snapshot id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    connections = (_connect_to_region(reg) for reg in reg_names)
+    for con in connections:
+        for snap in con.get_all_snapshots(owner='self'):
+            yield snap.id if id_only else snap
 
-	print '\nCreating a new volume from snapshot ' + chosenSnapshot.id + '....'
 
-	volume = conn.create_volume(
-		size=chosenSnapshot.volume_size,
-		zone=mountOnServer.placement,
-		snapshot=chosenSnapshot.id
-	)
+def _select_snapshot():
 
-	print 'New volume ID is: ' + volume.id
-	print 'Attaching the new volume to the ' + mountOnServerLabel + ' server....'
+    region_name = _prompt_to_select([reg.name for reg in _regions()],
+                                    'Select region from')
 
-	attach = volume.attach(mountOnServer.id, device)
-	
-	status = ' '
-	while status != 'attached':
-		time.sleep(2) # wait for the device to appear on the server
-		volume.update()
-		status = volume.attach_data.status
-		print 'Waiting: volume status is still ' + status
-	
-	print 'Volume is attached to ' + mountOnServer.id + ' on ' + device
+    def pick_out_snapshot(region_name, volume_id=None):
+        snaps = _get_all_snapshots(region_name)
+        if volume_id:
+            snaps = (snap for snap in snaps if snap.volume_id == volume_id)
+#           print "\nSnapshot ID\tVolume ID\tDate\t\t\t\tDescription\n"
+#                   (item.id, item.volume_id, item.start_time, item.description)
+        snaps = dict((snap.id, {'Volume': snap.volume_id,
+                                'Date': snap.start_time,
+                                'Description': snap.description}
+                     ) for snap in snaps)
+        return region_name, _prompt_to_select(snaps, 'Select snapshot from',
+                                              paging=True)
 
-	if region == 'us-east-1': # mount the volume on the server
+    snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
+                     'otherwise)')
+    if snap_id:
+        if snap_id in _get_all_snapshots(region_name, id_only=True):
+            return region_name, snap_id
+        else:
+            print 'No snapshot with provided ID found'
+    instances = list(_get_all_instances(region_name, id_only=True))
+    instance_id = _prompt_to_select(instances, 'Select instance from')
 
-		print '\nMounting volume %s:' % volume.id
+    all_instances = _get_all_instances(region_name)
+    inst = [inst for inst in all_instances if inst.id == instance_id][0]
+    volumes = [dev.volume_id for dev in inst.block_device_mapping.values()]
+    volume_id = _prompt_to_select(volumes, 'Select volume from')
+    return pick_out_snapshot(region_name, volume_id)
 
-		directory = 'tmpSnapshot'
-		mountpoint = '/media/' + directory
-	
-		print 'Creating mountpoint at ' + mountpoint
-		command = 'mkdir ' + mountpoint
-		os.system(command)
-	
-		command = 'mount -t ext3 ' + device + ' ' + mountpoint
-		os.system(command)
-		print 'Your backup is mounted on the ' + mountOnServerLabel + ' server at ' + \
-			mountpoint + '\n'
 
-	else: # we just created the server, user has to login and mount manually
-	
-		print '\nYou may now SSH into the ' + mountOnServerLabel + ' server, using:'
-		print 'ssh -i /path/to/your/key/ ubuntu@' + mountOnServer.public_dns_name
-		print 'then mount the backup volume located at ' + device
+def mount_snapshot(region=None, snap_id=None):
 
-	#################################################
-	# Cleanup processing: detach and delete backup volume, terminate temporary server
-	#################################################
+    """Mount snapshot to temporary created instance."""
 
-	finished = ' '
-	while finished != 'FINISHED':
-		finished = raw_input('Enter FINISHED if you are finished looking at the backup and would like to cleanup: ')
-		finished = finished.strip() # remove whitspace
+    if not region or not snap_id:
+        region, snap_id = _select_snapshot()
+    conn = _connect_to_region(region)
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
 
-	print '\nThe cleanup process will almost certainly break if you have not unmounted the backup.'
-	res = ' '
-	while res != 'y':
-		res = raw_input('Have you unmounted the backup volume (y or no)?: ')
-		res = res.strip() # remove whitspace
+#   print "volume ID\tInstance ID\tState\tInstance Type\tKey Name\tLocation\tIP Address\n"
 
-	if region == 'us-east-1': # where we are running the script on the infrastructure server
-		
-		print '\nUnmounting the backup....'
-		command = 'umount ' + mountpoint
-		os.system(command)
-		
-		print 'Deleting the mountpoint....'
-		command = 'rmdir ' + mountpoint
-		os.system(command)
-	
-	print 'Detaching the volume from ' + mountOnServerLabel + ' server....'
-	detach = volume.detach()
+#       (volumeid,  item.id, item.state,\
+#        item.instance_type, item.key_name, item.placement, item.ip_address)
 
-	waitStep = 2
-	totalWait = 0
-	status = ' '
-	while status != 'available':
-		time.sleep(waitStep) # wait for the volume to fully detach
-		totalWait = totalWait + waitStep
-		volume.update()
-		status = volume.status
-		print 'Waiting: volume status is still ' + status
-		if totalWait > 60: # something wrong if one minute is not enough
-			print 'Failed to detach volume ' + volume.id
-			break
+#                   (chosenSnapshot.id, chosenSnapshot.volume_id, \
+#                    chosenSnapshot.start_time, chosenSnapshot.description)
 
-	print 'Deleting the backup volume....'
-	try:
-		delete = volume.delete()
-	except:
-		print 'Failed to delete volume ' + volume.id
-	
-	if mountOnServerLabel == 'temporary': # only terminate temporary server
-		print 'Deleting the ' + mountOnServerLabel + ' server....'
-		try:
-			mountOnServer.terminate()
-		except:
-			print 'Failed to terminate ' + mountOnServerLabel + ' server ' + mountOnServer.id
+#               (chosenInstance.block_device_mapping['/dev/sda1'].volume_id, chosenInstance.id, \
+#                chosenInstance.state, chosenInstance.instance_type, \
+#                chosenInstance.key_name, chosenInstance.ip_address)
 
-	print '\nCleanup complete, exiting script.'
+#           print "\nSnapshot ID\tVolume ID\tDate\t\t\t\tDescription\n"
+#                  defaultSnapshot = item # AWS by default lists from oldest to newest, so the last one will be newest
+#                   (item.id, item.volume_id, item.start_time, item.description)
+
+#   		print '\nYou have chosen:'
+#   			(chosenSnapshot.id, chosenSnapshot.volume_id, \
+#   			 chosenSnapshot.start_time, chosenSnapshot.description)
+
+    try:
+        volume = conn.create_volume(snapshot=snap.id, size=snap.volume_size,
+                                    zone=conn.get_all_zones()[0].name)
+        print 'New volume ID is: ' + volume.id
+
+        try:
+            inst = create_temp_instance(region)
+
+            while inst.state != 'running':
+                print 'Waiting: {inst} server is still {inst.state}'.format(
+                    inst=inst)
+                _sleep(4)
+                inst.update()
+
+            attach = volume.attach(inst.id, device)
+            volume.update()
+            while volume.attach_data.status != 'attached':
+                print 'Waiting: volume status is still ' + volume.attach_data.status
+                _sleep(4)
+                volume.update()
+            print 'Volume is attached to ' + inst.id + ' on ' + device
+
+            key_file = _config_get_or_set(config_file, 'key_filename', region)
+            env.update({
+                'host_string': inst.public_dns_name,
+                'key_filename': key_file,
+                'user': username,
+            })
+            sudo('mkdir {mnt}'.format(mnt=mountpoint))
+            sudo('mount {dev} {mnt}'.format(dev=device, mnt=mountpoint))
+
+            info = ('\nYou may now SSH into the {inst} server, using: \n'
+                    'ssh -i {key} {user}@{inst.public_dns_name} \n'
+                    'and browse mounted at {mountpoint} backup volume {device}')
+            print info.format(inst=inst, device=device, key=key_file,
+                              user=username, mountpoint=mountpoint)
+
+            info = ('\nEnter FINISHED if you are finished looking at the '
+                    'backup and would like to cleanup: ')
+            while raw_input(info).strip() != 'FINISHED':
+                pass
+
+#           sudo('umount {mnt}'.format(mnt=mountpoint))
+
+        except Exception, err:
+            print_exc()
+        # Cleanup processing: terminate temporary server.
+        finally:
+            print 'Deleting the {0}...'.format(inst)
+            inst.terminate()
+
+    except Exception, err:
+        print_exc()
+    # Cleanup processing: detach and delete backup volume.
+    finally:
+        print 'Detaching the volume from {0} server....'.format(inst)
+        detach = volume.detach()
+
+        waitStep = 5
+        totalWait = 0
+        while volume.status != 'available':
+            _sleep(waitStep) # wait for the volume to fully detach
+            totalWait = totalWait + waitStep
+            volume.update()
+            print 'Waiting: volume status is still ' + volume.status
+            if totalWait > 60: # something wrong if one minute is not enough
+                print 'Failed to detach volume ' + volume.id
+                break
+
+        print 'Deleting the backup volume...'
+        delete = volume.delete()
