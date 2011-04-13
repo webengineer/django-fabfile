@@ -1,13 +1,13 @@
 from setuptools import setup, find_packages
 
-from django_fabfile import __doc__, __version__
+from django_fabfile import __doc__
 
 
 setup(
     name='django-fabfile',
     url='http://redmine.odeskps.com/projects/django-fabfile',
     download_url='http://pypi.odeskps.com/django-fabfile',
-    version=__version__,
+    version='0.9.5.4',
     description='Deployment Django projects with Fabric.',
     long_description=__doc__,
     maintainer='Yury Yurevich',
