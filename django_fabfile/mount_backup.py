@@ -129,7 +129,7 @@ def _prompt_to_select(choices, query='Select from', paging=False):
 
     """Prompt to select an option from provided choices.
 
-    choices: list or dict. If dict, then chioce will be made among keys.
+    choices: list or dict. If dict, then choice will be made among keys.
     paging: render long list with pagination.
 
     Return solely possible value instantly without prompting."""
