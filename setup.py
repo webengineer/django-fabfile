@@ -9,6 +9,10 @@ setup(
     download_url='http://pypi.odeskps.com/django-fabfile',
     version='0.9.5.4',
     description='Deployment Django projects with Fabric.',
+    install_requires=[
+        'boto>=2.0b4',
+        'Fabric>=0.9.3',
+    ],
     long_description=__doc__,
     maintainer='Yury Yurevich',
     maintainer_email='yyurevich@jellycrystal.com',
