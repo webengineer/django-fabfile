@@ -16,6 +16,7 @@ All other options will be saved in ./fabfile.cfg file.
 from ConfigParser import ConfigParser as _ConfigParser
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
+from re import compile as _compile
 from time import sleep as _sleep
 from traceback import print_exc as _print_exc
 from warnings import warn as _warn
@@ -55,6 +56,30 @@ username = _config_get_or_set(config_file, 'username', default_value='ubuntu')
 device = _config_get_or_set(config_file, 'device', default_value='/dev/sdm')
 mountpoint = _config_get_or_set(config_file, 'mountpoint',
                                 default_value='/media/snapshot')
+# Official Ubuntu AMIs are published in EC2 by the 'Canonical' user, see
+# https://help.ubuntu.com/community/EC2StartersGuide#Getting%20the%20images
+ubuntu_aws_account = _config_get_or_set(config_file, 'ubuntu_aws_account',
+                                        default_value='099720109477')
+architecture = _config_get_or_set(config_file, 'architecture',
+                                  default_value='x86_64')
+root_device_type = _config_get_or_set(config_file, 'root_device_type',
+                                      default_value='ebs')
+ami_ptrn = _config_get_or_set(
+    config_file, 'ami_ptrn',
+    default_value='ebs/ubuntu-images/ubuntu-*-server-*')
+ami_ptrn_with_version = _config_get_or_set(
+    config_file, 'ami_ptrn_with_version',
+    default_value='ebs/ubuntu-images/ubuntu-*-{version}-*-server-*')
+ami_ptrn_with_relase_date = _config_get_or_set(
+    config_file, 'ami_ptrn_with_relase_date',
+    default_value='ebs/ubuntu-images/ubuntu-*-{version}-*-server-'
+                  '{released_at}')
+ami_regexp = _config_get_or_set(
+    config_file, 'ami_regexp',
+    default_value=(
+        r'^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-'
+         '[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$')
+)
 
 
 def create_instance(region='us-east-1'):
@@ -67,23 +92,30 @@ def create_instance(region='us-east-1'):
             'access the instance').format(region)
     key_pair = _config_get_or_set(config_file, 'key_pair', region, info=info)
 
-    config = _ConfigParser()
-    config.read(config_file)
-    ami = config.get(region, 'ami') if config.has_option(region, 'ami') else ''
-    image = None
-    while not image:    # `ami` is rotated according to new Ubuntu releases.
-        try:
-            image = _connect_to_region(region).get_image(ami)
-        except _EC2ResponseError:
-            info = (
-                'Please enter fresh ami ID listed under '
-                'http://uec-images.ubuntu.com/releases/ for ' +
-                region + ' and t1.micro instance type')
-            ami = prompt(info)
-            config.set(region, 'ami', ami)
-            with open(config_file, 'w') as f_p:
-                config.write(f_p)
+    conn = _connect_to_region(region)
 
+    filters={'owner_id': ubuntu_aws_account, 'architecture': architecture,
+             'name': ami_ptrn, 'image_type': 'machine',
+             'root_device_type': root_device_type}
+    images = conn.get_all_images(filters=filters)
+
+    # Filtering by latest version.
+    ptrn = _compile(ami_regexp)
+    versions = set([ptrn.search(img.name).group('version') for img in images])
+    def complement(year_month):
+        return '0' + year_month if len(year_month) == 4 else year_month
+    latest_version = sorted(set(filter(complement, versions)))[-1]  # XXX Y3K.
+    name_with_version = ami_ptrn_with_version.format(version=latest_version)
+    filters.update({'name': name_with_version})
+    images = conn.get_all_images(filters=filters)
+    # Filtering by latest release date.
+    dates = set([ptrn.search(img.name).group('released_at') for img in images])
+    latest_date = sorted(set(dates))[-1]
+    name_with_version_and_release = ami_ptrn_with_relase_date.format(
+        version=latest_version, released_at=latest_date)
+    filters.update({'name': name_with_version_and_release})
+    image = conn.get_all_images(filters=filters)[0]
+    # Launching new instance.
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=image.connection.get_all_zones()[0].name)
     print ('{res.instances[0]} created in {zone}.'.format(
