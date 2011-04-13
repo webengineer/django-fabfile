@@ -23,7 +23,6 @@ from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
-from boto.exception import EC2ResponseError as _EC2ResponseError
 from fabric.api import env, prompt, sudo
 
 
