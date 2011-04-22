@@ -13,7 +13,6 @@ at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 All other options will be saved in ./fabfile.cfg file.
 '''
 
-from ConfigParser import ConfigParser as _ConfigParser
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile
@@ -25,31 +24,10 @@ from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from fabric.api import env, prompt, sudo
 
+from utils import _config_get_or_set
+
 
 config_file = 'fabfile.cfg'
-
-def _config_get_or_set(filename, option, section='DEFAULT', default_value=None,
-                       info=None):
-
-    """Open config `filename` and try to get `option` value.
-
-    If no `default_value` provided, prompt user with `info`."""
-
-    config = _ConfigParser()
-    config.read(filename)
-    if not config.has_option(section, option):
-        if (not section in config.sections() and
-            not section.lower() == 'default'):
-            config.add_section(section)
-        if default_value is not None:
-            config.set(section, option, default_value)
-        else:
-            value = prompt(info or 'Please enter {0} for {1}'.format(option,
-                                                                     section))
-            config.set(section, option, value)
-        with open(filename, 'w') as f_p:
-            config.write(f_p)
-    return config.get(section, option)
 
 username = _config_get_or_set(config_file, 'username', default_value='ubuntu')
 device = _config_get_or_set(config_file, 'device', default_value='/dev/sdm')
