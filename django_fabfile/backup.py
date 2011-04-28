@@ -39,10 +39,12 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
         description += ' named as {0}'.format(instance.tags['Name'])
     conn = _connect_to_region(region)
     snapshot = conn.create_snapshot(vol_id, description)
+    for tag in instance.tags:   # Clone intance tags to the snapshot.
+        snapshot.add_tag(tag, instance.tags[tag])
     print 'Waiting for the {snap} to be completed...'.format(snap=snapshot)
     while snapshot.status != 'completed':
         print 'still {snap.status}...'.format(snap=snapshot)
-        _sleep(4)
+        _sleep(5)
         snapshot.update()
     print 'done.'
     return snapshot
