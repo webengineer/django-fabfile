@@ -53,8 +53,10 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
 def backup_instance(region, instance_id):
     """Return list of created snapshots for specified instance."""
     instance = _get_instance_by_id(region, instance_id)
+    snapshots = []  # NOTE Fabric doesn't supports generators.
     for dev in instance.block_device_mapping:
-        return create_snapshot(region, instance=instance, dev=dev)
+        snapshots.append(create_snapshot(region, instance=instance, dev=dev))
+    return snapshots
 
 
 def upload_snapshot_to_s3(region, snapshot_id, bucket):
