@@ -17,11 +17,11 @@ from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile
 from time import sleep as _sleep
-from traceback import print_exc as _print_exc
 from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
+from boto.exception import BotoServerError as _BotoServerError
 from fabric.api import env, prompt, sudo
 
 from utils import _config_get_or_set
@@ -59,17 +59,43 @@ ami_regexp = _config_get_or_set(
 )
 
 
-def create_instance(region='us-east-1'):
+def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
+    """Wait for attribute to go into state.
+
+    attrs
+        list of nested attribute names;
+    update_attr
+        will be called to refresh state."""
+    print 'Waiting for the {0} to be {1}...'.format(obj, state)
+    def get_nested_attr(obj, attrs):
+        attr = obj
+        for attr_name in attrs:
+            attr = getattr(attr, attr_name)
+        return attr
+    sleep_for = 3
+    while get_nested_attr(obj, attrs) != state:
+        print 'still {0}...'.format(get_nested_attr(obj, attrs))
+        sleep_for += 2
+        _sleep(min(sleep_for, max_sleep))
+        getattr(obj, update_attr)()
+    print 'done.'
+
+
+def create_instance(region_name='us-east-1', zone_name=None):
 
     """Create AWS EC2 instance.
 
-    Return created instance."""
+    Return created instance.
+
+    zone
+        string-formatted name. By default will be used latest zone."""
 
     info = ('Please enter keypair name in the {0} region for person who will '
-            'access the instance').format(region)
-    key_pair = _config_get_or_set(config_file, 'key_pair', region, info=info)
+            'access the instance').format(region_name)
+    key_pair = _config_get_or_set(config_file, 'key_pair', region_name,
+                                  info=info)
 
-    conn = _connect_to_region(region)
+    conn = _connect_to_region(region_name)
 
     filters={'owner_id': ubuntu_aws_account, 'architecture': architecture,
              'name': ami_ptrn, 'image_type': 'machine',
@@ -92,11 +118,13 @@ def create_instance(region='us-east-1'):
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
-    # Launching new instance.
+    zone = zone_name or conn.get_all_zones()[-1].name
+    print 'Launching new instance in {zone} from {image}'.format(image=image,
+                                                                 zone=zone)
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
-                            placement=image.connection.get_all_zones()[0].name)
-    print ('{res.instances[0]} created in {zone}.'.format(
-        res=reservation, zone=image.connection.get_all_zones()[0]))
+                            placement=zone)
+    print '{res.instances[0]} created in {zone}.'.format(res=reservation,
+                                                         zone=zone)
 
     assert len(reservation.instances) == 1, 'More than 1 instances created'
 
@@ -204,81 +232,80 @@ def mount_snapshot(region=None, snap_id=None):
     conn = _connect_to_region(region)
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
 
-    try:
-        volume = conn.create_volume(snapshot=snap.id, size=snap.volume_size,
-                                    zone=conn.get_all_zones()[0].name)
-        print 'New {vol} created from {snap} in {zone}.'.format(
-            vol=volume, snap=snap, zone=conn.get_all_zones()[0])
-
+    def _mount_snapshot_in_zone(snap_id, zone):
+        volume = inst = None
         try:
-            inst = create_instance(region)
+            volume = conn.create_volume(
+                snapshot=snap.id, size=snap.volume_size, zone=zone)
+            print 'New {vol} created from {snap} in {zone}.'.format(
+                vol=volume, snap=snap, zone=zone)
 
-            print 'Waiting for the {inst} to be running...'.format(inst=inst)
-            while inst.state != 'running':
-                print 'still {inst.state}...'.format(inst=inst)
-                _sleep(7)
-                inst.update()
-            print 'done.'
+            try:
+                inst = create_instance(zone.region.name, zone.name)
+                _wait_for(inst, ['state',], 'running')
 
-            attach = volume.attach(inst.id, device)
-            volume.update()
-            print 'Waiting for the {vol} to be attached...'.format(vol=volume)
-            while volume.attach_data.status != 'attached':
-                print 'still {vol.attach_data.status}...'.format(vol=volume)
-                _sleep(4)
+                attach = volume.attach(inst.id, device)
                 volume.update()
-            print 'done. Volume is attached to {inst} as {dev}.'.format(
-                inst=inst, dev=device)
+                _wait_for(volume, ['attach_data', 'status'], 'attached')
+                print 'Volume is attached to {inst} as {dev}.'.format(
+                    inst=inst, dev=device)
 
-            info = ('Please enter private key location of your keypair '
-                    'in {region} region').format(region=region)
-            key_file = _config_get_or_set(config_file, 'key_filename', region,
-                                          info=info)
-            env.update({
-                'host_string': inst.public_dns_name,
-                'key_filename': key_file,
-                'load_known_hosts': False,
-                'user': username,
-            })
-            while True:
+                info = ('Please enter private key location of your keypair '
+                        'in {region}').format(region=zone.region)
+                key_file = _config_get_or_set(config_file, 'key_filename',
+                                              zone.region.name, info=info)
+                env.update({
+                    'host_string': inst.public_dns_name,
+                    'key_filename': key_file,
+                    'load_known_hosts': False,
+                    'user': username,
+                })
+                while True:
+                    try:
+                        sudo('mkdir {mnt}'.format(mnt=mountpoint))
+                        break
+                    except:
+                        print 'sshd still launching, waiting to try again...'
+                        _sleep(5)
+                info = ('\nYou may now SSH into the {inst} server, using:'
+                        '\n ssh -i {key} {user}@{inst.public_dns_name}')
                 try:
-                    sudo('mkdir {mnt}'.format(mnt=mountpoint))
-                    break
+                    sudo('mount {dev} {mnt}'.format(dev=device, mnt=mountpoint))
                 except:
-                    print 'sshd still launching, will try again in a moment...'
-                    _sleep(5)
-            sudo('mount {dev} {mnt}'.format(dev=device, mnt=mountpoint))
+                    info += ('\nand mount {device}. NOTE: device name may be '
+                             'modified by system.')
+                else:
+                    info += ('\nand browse mounted at {mountpoint} backup '
+                             'volume {device}.')
+                print info.format(inst=inst, device=device, key=key_file,
+                                  user=username, mountpoint=mountpoint)
 
-            info = ('\nYou may now SSH into the {inst} server, using: \n'
-                    'ssh -i {key} {user}@{inst.public_dns_name} \n'
-                    'and browse mounted at {mountpoint} backup volume {device}.')
-            print info.format(inst=inst, device=device, key=key_file,
-                              user=username, mountpoint=mountpoint)
+                info = ('\nEnter FINISHED if you are finished looking at the '
+                        'backup and would like to cleanup: ')
+                while raw_input(info).strip() != 'FINISHED':
+                    pass
 
-            info = ('\nEnter FINISHED if you are finished looking at the '
-                    'backup and would like to cleanup: ')
-            while raw_input(info).strip() != 'FINISHED':
-                pass
+            # Cleanup processing: terminate temporary server.
+            finally:
+                if inst:
+                    print 'Deleting the {0}...'.format(inst)
+                    inst.terminate()
+                    print 'done.'
 
-        except:
-            _print_exc()
-        # Cleanup processing: terminate temporary server.
+        # Cleanup processing: delete detached backup volume.
         finally:
-            print 'Deleting the {0}...'.format(inst)
-            inst.terminate()
-            print 'done.'
+            if volume:
+                _wait_for(volume, ['status',], 'available')
 
-    except:
-        _print_exc()
-    # Cleanup processing: delete detached backup volume.
-    finally:
-        print 'Waiting for the {vol} to be available...'.format(vol=volume)
-        while volume.status != 'available':
-            print 'still {vol.status}...'.format(vol=volume)
-            _sleep(8)   # Wait for the volume to fully detach.
-            volume.update()
-        print 'done.'
+                print 'Deleting the backup {vol}...'.format(vol=volume)
+                delete = volume.delete()
+                print 'done.'
 
-        print 'Deleting the backup {vol}...'.format(vol=volume)
-        delete = volume.delete()
-        print 'done.'
+    for zone in conn.get_all_zones():
+        try:
+            _mount_snapshot_in_zone(snap_id, zone)
+        except _BotoServerError, err:
+            print '{0} in {1}'.format(err, zone)
+            continue
+        else:
+            break
