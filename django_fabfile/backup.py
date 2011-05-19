@@ -45,8 +45,6 @@ ami_ptrn = config.get('mount_backups', 'ami_ptrn')
 ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
 ami_ptrn_with_relase_date = config.get('mount_backups', 'ami_ptrn_with_relase_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
-key_pair = config.get(region, 'key_pair')
-key_filename = config.get(region, 'key_filename')
 
 
 def _get_instance_by_id(region, instance_id):
@@ -101,15 +99,17 @@ def backup_instance(region=region, instance_id=instance_id):
 
 
 def trim_snapshots(
-    conn=conn, hourly_backups=hourly_backups, daily_backups=daily_backups,
+    region=region, hourly_backups=hourly_backups, daily_backups=daily_backups,
     weekly_backups=weekly_backups, monthly_backups=monthly_backups,
     quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
     dry_run=dry_run):
 
-    """Delete snapshots in logarithmic way.
+    """Delete snapshots back in time in logarithmic manner.
 
     dry_run
         just print snapshot to be deleted."""
+
+    conn = _connect_to_region(region)
 
     now = datetime.utcnow() # work with UTC time, which is what the snapshot start time is reported in
     last_hour = datetime(now.year, now.month, now.day, now.hour)
@@ -282,6 +282,7 @@ def create_instance(region_name='us-east-1', zone_name=None):
     zone = zone_name or conn.get_all_zones()[-1].name
     print 'Launching new instance in {zone} from {image}'.format(image=image,
                                                                  zone=zone)
+    key_pair = config.get(region, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=zone)
     print '{res.instances[0]} created in {zone}.'.format(res=reservation,
@@ -410,8 +411,7 @@ def mount_snapshot(region=None, snap_id=None):
                 print 'Volume is attached to {inst} as {dev}.'.format(
                     inst=inst, dev=device)
 
-                info = ('Please enter private key location of your keypair '
-                        'in {region}').format(region=zone.region)
+                key_filename = config.get(zone.region.name, 'key_filename')
                 env.update({
                     'host_string': inst.public_dns_name,
                     'key_filename': key_filename,
