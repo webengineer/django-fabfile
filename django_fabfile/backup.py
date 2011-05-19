@@ -3,21 +3,23 @@
 Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
-All other options will be saved in ./fabfile.cfg file.
+All other options will be taken from ./fabfile.cfg file.
 '''
 
+from datetime import timedelta as _timedelta, datetime
+from ConfigParser import ConfigParser as _ConfigParser
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile
 from time import sleep as _sleep
 from warnings import warn as _warn
+
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.exception import BotoServerError as _BotoServerError
-from ConfigParser import ConfigParser as _ConfigParser
 import os, sys
-from datetime import timedelta as _timedelta, datetime
 from fabric.api import env, prompt, sudo
+
 
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
@@ -46,9 +48,9 @@ ami_regexp = config.get('mount_backups', 'ami_regexp')
 key_pair = config.get(region, 'key_pair')
 key_filename = config.get(region, 'key_filename')
 
-conn = _connect_to_region(region)
 
 def _get_instance_by_id(region, instance_id):
+    conn = _connect_to_region(region)
     res = conn.get_all_instances([instance_id,])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res, instance_id))
@@ -62,7 +64,12 @@ def _get_instance_by_id(region, instance_id):
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     """Return newly created snapshot of specified instance device.
 
-    Either `instance_id` or `instance` should be specified."""
+    region
+        name of region where instance is located;
+    instance, instance_id
+        either `instance_id` or `instance` argument should be specified;
+    dev
+        by default /dev/sda1 will be snapshotted."""
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     if instance_id:
@@ -71,6 +78,7 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     description = 'Created from {0} of {1}'.format(dev, instance.id)
     if instance.tags.get('Name'):
         description += ' named as {0}'.format(instance.tags['Name'])
+    conn = _connect_to_region(region)
     snapshot = conn.create_snapshot(vol_id, description)
     for tag in instance.tags:   # Clone intance tags to the snapshot.
         snapshot.add_tag(tag, instance.tags[tag])
@@ -92,7 +100,17 @@ def backup_instance(region=region, instance_id=instance_id):
     return snapshots
 
 
-def trim_snapshots(conn = conn, hourly_backups = hourly_backups, daily_backups = daily_backups, weekly_backups = weekly_backups, monthly_backups = monthly_backups, quarterly_backups = quarterly_backups, yearly_backups = yearly_backups, dry_run = dry_run):
+def trim_snapshots(
+    conn=conn, hourly_backups=hourly_backups, daily_backups=daily_backups,
+    weekly_backups=weekly_backups, monthly_backups=monthly_backups,
+    quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
+    dry_run=dry_run):
+
+    """Delete snapshots in logarithmic way.
+
+    dry_run
+        just print snapshot to be deleted."""
+
     now = datetime.utcnow() # work with UTC time, which is what the snapshot start time is reported in
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
@@ -223,12 +241,15 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         getattr(obj, update_attr)()
     print 'done.'
 
+
 def create_instance(region_name='us-east-1', zone_name=None):
 
     """Create AWS EC2 instance.
 
     Return created instance.
 
+    region_name
+        by default will be created in the us-east-1 region;
     zone
         string-formatted name. By default will be used latest zone."""
 
