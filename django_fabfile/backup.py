@@ -16,7 +16,7 @@ from boto.ec2 import (connect_to_region as _connect_to_region,
 from boto.exception import BotoServerError as _BotoServerError
 from ConfigParser import ConfigParser as _ConfigParser
 import os, sys
-from datetime import timedelta, datetime
+from datetime import timedelta as _timedelta, datetime
 from fabric.api import env, prompt, sudo
 
 config_file = 'fabfile.cfg'
@@ -92,20 +92,11 @@ def backup_instance(region=region, instance_id=instance_id):
     return snapshots
 
 
-def upload_snapshot_to_s3(region, snapshot_id, bucket):
-    """`snapshot_id` will be used as filename in the `bucket`."""
-    pass
-
-
-def fetch_snapshot_from_s3(region, snapshot_id, bucket):
-    """`snapshot_id` name will be searched withit the the `bucket`."""
-    pass
-
 def trim_snapshots(conn = conn, hourly_backups = hourly_backups, daily_backups = daily_backups, weekly_backups = weekly_backups, monthly_backups = monthly_backups, quarterly_backups = quarterly_backups, yearly_backups = yearly_backups, dry_run = dry_run):
     now = datetime.utcnow() # work with UTC time, which is what the snapshot start time is reported in
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
-    last_sunday = datetime(now.year, now.month, now.day) - timedelta(days = (now.weekday() + 1) % 7)
+    last_sunday = datetime(now.year, now.month, now.day) - _timedelta(days = (now.weekday() + 1) % 7)
     last_month = datetime(now.year, now.month -1, now.day)
     last_year = datetime(now.year-1, now.month, now.day)
     other_years = datetime(now.year-2, now.month, now.day)
@@ -116,26 +107,26 @@ def trim_snapshots(conn = conn, hourly_backups = hourly_backups, daily_backups =
     oldest_snapshot_date = datetime(2000, 1, 1) # there are no snapshots older than 1/1/2002
 
     for hour in range(0, hourly_backups):
-        target_backup_times.append(last_hour - timedelta(hours = hour))
+        target_backup_times.append(last_hour - _timedelta(hours = hour))
 
     for day in range(0, daily_backups):
-        target_backup_times.append(last_midnight - timedelta(days = day))
+        target_backup_times.append(last_midnight - _timedelta(days = day))
 
     for week in range(0, weekly_backups):
-        target_backup_times.append(last_sunday - timedelta(weeks = week))
+        target_backup_times.append(last_sunday - _timedelta(weeks = week))
 
     for month in range(0, monthly_backups):
-        target_backup_times.append(last_month- timedelta(weeks= month*4))
+        target_backup_times.append(last_month- _timedelta(weeks= month*4))
 
     for quart in range(0, quarterly_backups):
-        target_backup_times.append(last_year- timedelta(weeks= quart*16))
+        target_backup_times.append(last_year- _timedelta(weeks= quart*16))
 
     for year in range(0, yearly_backups):
-        target_backup_times.append(other_years- timedelta(days = year*365))
+        target_backup_times.append(other_years- _timedelta(days = year*365))
 
     #print target_backup_times
 
-    one_day = timedelta(days = 1)
+    one_day = _timedelta(days = 1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
         target_backup_times.append(start_of_month)
