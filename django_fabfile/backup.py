@@ -134,7 +134,7 @@ def backup_instance(region=region):
     return snapshots
 
 
-def trim_snapshots(
+def _trim_snapshots(
     region=region, hourly_backups=hourly_backups, daily_backups=daily_backups,
     weekly_backups=weekly_backups, monthly_backups=monthly_backups,
     quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
@@ -281,8 +281,16 @@ def trim_snapshots(
 def trim_snapshots_for_regions():
     reg_names = (reg.name for reg in _regions())
     for reg in reg_names:
-        regions_trim = trim_snapshots(region=reg)
+        print reg
+        regions_trim = _trim_snapshots(region=reg)
     return regions_trim
+
+def trim_snapshots(region=region):
+    if region:
+        trim = _trim_snapshots(region)
+    else:
+        trim = trim_snapshots_for_regions()
+    return trim
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
     """Wait for attribute to go into state.
