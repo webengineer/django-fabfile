@@ -26,6 +26,8 @@ config = _ConfigParser()
 config.read(config_file)
 region = config.get('main', 'region')
 instance_id = config.get('main', 'instance_id')
+tag_name = config.get('main', 'tag_name')
+tag_value = config.get('main', 'tag_value')
 
 hourly_backups = config.getint('purge_backups', 'hourly_backups')
 daily_backups = config.getint('purge_backups', 'daily_backups')
@@ -42,8 +44,10 @@ ubuntu_aws_account = config.get('mount_backups', 'ubuntu_aws_account')
 architecture = config.get('mount_backups', 'architecture')
 root_device_type = config.get('mount_backups', 'root_device_type')
 ami_ptrn = config.get('mount_backups', 'ami_ptrn')
-ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
-ami_ptrn_with_relase_date = config.get('mount_backups', 'ami_ptrn_with_relase_date')
+ami_ptrn_with_version = config.get('mount_backups',
+                                          'ami_ptrn_with_version')
+ami_ptrn_with_relase_date = config.get('mount_backups',
+                                      'ami_ptrn_with_relase_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 
@@ -51,13 +55,24 @@ def _get_instance_by_id(region, instance_id):
     conn = _connect_to_region(region)
     res = conn.get_all_instances([instance_id,])
     assert len(res) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(res, instance_id))
+        'Returned more than 1 {0} for instance_id {1}'.format(res,
+                                                      instance_id))
     instances = res[0].instances
     assert len(instances) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(instances,
                                                               instance_id))
     return instances[0]
 
+def _get_instance_by_tag(region, tag_name, tag_value):
+    conn = _connect_to_region(region)
+    res = conn.get_all_tags()
+    instances_list = []
+    for inst in res:
+        if (inst.name == tag_name and inst.value == tag_value and
+            inst.res_type == 'instance'):
+            instances_list.append(inst.res_id)
+    #print instances_list
+    return instances_list
 
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     """Return newly created snapshot of specified instance device.
@@ -80,7 +95,8 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     snapshot = conn.create_snapshot(vol_id, description)
     for tag in instance.tags:   # Clone intance tags to the snapshot.
         snapshot.add_tag(tag, instance.tags[tag])
-    print 'Waiting for the {snap} to be completed...'.format(snap=snapshot)
+    print 'Waiting for the {snap} for {inst} to be completed...'.format(
+                                        snap=snapshot, inst=instance.id)
     while snapshot.status != 'completed':
         print 'still {snap.status}...'.format(snap=snapshot)
         _sleep(5)
@@ -88,8 +104,28 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     print 'done.'
     return snapshot
 
+def backup_instance_by_tag(region=region,tag_name=tag_name,tag_value=tag_value):
+    """Creates backup for all instances with given tag in region"""
+    if region:
+        _instances_list = _get_instance_by_tag(region, tag_name, tag_value)
+        #print _instances_list
+    snapshots = []
+    for instance_id in _instances_list:
+        if instance_id:
+            instance = _get_instance_by_id(region, instance_id)
+        for dev in instance.block_device_mapping:
+            snapshots.append(create_snapshot(region, instance=instance,
+                                             dev=dev))
+    return snapshots
 
-def backup_instance(region=region, instance_id=instance_id):
+def backup_instances_by_regions(tag_name=tag_name,tag_value=tag_value):
+    """Creates backups for all instances with matching tags in all regions"""
+    reg_names = (reg.name for reg in _regions())
+    for reg in reg_names:
+        #print reg
+        snapshots = backup_instance_by_tag(reg,tag_name,tag_value)
+
+def backup_instance(region=region):
     """Return list of created snapshots for specified instance."""
     instance = _get_instance_by_id(region, instance_id)
     snapshots = []  # NOTE Fabric doesn't supports generators.
@@ -110,19 +146,20 @@ def trim_snapshots(
         just print snapshot to be deleted."""
 
     conn = _connect_to_region(region)
-
-    now = datetime.utcnow() # work with UTC time, which is what the snapshot start time is reported in
+    # work with UTC time, which is what the snapshot start time is reported in
+    now = datetime.utcnow()
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
-    last_sunday = datetime(now.year, now.month, now.day) - _timedelta(days = (now.weekday() + 1) % 7)
+    last_sunday = datetime(now.year, now.month,
+          now.day) - _timedelta(days = (now.weekday() + 1) % 7)
     last_month = datetime(now.year, now.month -1, now.day)
     last_year = datetime(now.year-1, now.month, now.day)
     other_years = datetime(now.year-2, now.month, now.day)
     start_of_month = datetime(now.year, now.month, 1)
 
     target_backup_times = []
-
-    oldest_snapshot_date = datetime(2000, 1, 1) # there are no snapshots older than 1/1/2002
+    # there are no snapshots older than 1/1/2000
+    oldest_snapshot_date = datetime(2000, 1, 1)
 
     for hour in range(0, hourly_backups):
         target_backup_times.append(last_hour - _timedelta(hours = hour))
@@ -149,10 +186,12 @@ def trim_snapshots(
         # append the start of the month to the list of snapshot dates to save:
         target_backup_times.append(start_of_month)
         # there's no timedelta setting for one month, so instead:
-        # decrement the day by one, so we go to the final day of the previous month...
+        # decrement the day by one,
+        #so we go to the final day of the previous month...
         start_of_month -= one_day
         # ... and then go to the first day of that previous month:
-        start_of_month = datetime(start_of_month.year, start_of_month.month, 1)
+        start_of_month = datetime(start_of_month.year,
+                               start_of_month.month, 1)
 
     temp = []
 
@@ -163,12 +202,18 @@ def trim_snapshots(
     target_backup_times = temp
     target_backup_times.reverse() # make the oldest date first
 
-    # get all the snapshots, sort them by date and time, and organize them into one array for each volume:
+    conn = _connect_to_region(region)
+
+    # get all the snapshots, sort them by date and time,
+    #and organize them into one array for each volume:
     all_snapshots = conn.get_all_snapshots(owner = 'self')
-    all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time)) # oldest first
+    # oldest first
+    all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time))
+    #print all_snapshots
     snaps_for_each_volume = {}
     for snap in all_snapshots:
-        # the snapshot name and the volume name are the same. The snapshot name is set from the volume
+        # the snapshot name and the volume name are the same.
+        # The snapshot name is set from the volume
         # name at the time the snapshot is taken
         volume_name = snap.volume_id
         #print volume_name
@@ -182,43 +227,62 @@ def trim_snapshots(
             snaps_for_volume.append(snap)
             #print snaps_for_volume
 
-    # Do a running comparison of snapshot dates to desired time periods, keeping the oldest snapshot in each
+    # Do a running comparison of snapshot dates to desired time periods,
+    # keeping the oldest snapshot in each
     # time period and deleting the rest:
     for volume_name in snaps_for_each_volume:
         snaps = snaps_for_each_volume[volume_name]
-        snaps = snaps[:-1] # never delete the newest snapshot, so remove it from consideration
+        snaps = snaps[:-1]
+        # never delete the newest snapshot, so remove it from consideration
         #print snaps
         time_period_number = 0
         snap_found_for_this_time_period = False
         for snap in snaps:
             check_this_snap = True
             #print snap
-            while check_this_snap and time_period_number < target_backup_times.__len__():
-                snap_date = datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
+            while (check_this_snap and
+                  time_period_number < target_backup_times.__len__()):
+                snap_date = datetime.strptime(snap.start_time,
+                                      '%Y-%m-%dT%H:%M:%S.000Z')
                 #print snap_date
                 if snap_date < target_backup_times[time_period_number]:
-                    # the snap date is before the cutoff date. Figure out if it's the first snap in this
-                    # date range and act accordingly (since both date the date ranges and the snapshots
-                    # are sorted chronologically, we know this snapshot isn't in an earlier date range):
+                    # the snap date is before the cutoff date.
+                    # Figure out if it's the first snap in this
+                    # date range and act accordingly
+                    #(since both date the date ranges and the snapshots
+                    # are sorted chronologically, we know this
+                    #snapshot isn't in an earlier date range):
                     if snap_found_for_this_time_period == True:
                         if not snap.tags.get('preserve_snapshot'):
                             if dry_run == True:
-                                print('Dry-trimmed snapshot %s (%s)' % (snap, snap.start_time))
+                                print('Dry-trimmed snapshot %s (%s)' %
+                                               (snap, snap.start_time))
                             else:
-                                # as long as the snapshot wasn't marked with the 'preserve_snapshot' tag, delete it:
+                                # as long as the snapshot wasn't marked with
+                                # the 'preserve_snapshot' tag, delete it:
                                 conn.delete_snapshot(snap.id)
-                                print('Trimmed snapshot %s (%s)' % (snap, snap.start_time))
-                       # go on and look at the next snapshot, leaving the time period alone
+                                print('Trimmed snapshot %s (%s)' %
+                                          (snap, snap.start_time))
+                       # go on and look at the next snapshot,
+                       # leaving the time period alone
                     else:
-                       # this was the first snapshot found for this time period. Leave it alone and look at the
+                      # this was the first snapshot found for this time period
+                       # Leave it alone and look at the
                        # next snapshot:
                        snap_found_for_this_time_period = True
                     check_this_snap = False
                 else:
-                   # the snap is after the cutoff date. Check it against the next cutoff date
+                   # the snap is after the cutoff date.
+                   # Check it against the next cutoff date
                    #print 1
                    time_period_number += 1
                    snap_found_for_this_time_period = False
+
+def trim_snapshots_for_regions():
+    reg_names = (reg.name for reg in _regions())
+    for reg in reg_names:
+        regions_trim = trim_snapshots(region=reg)
+    return regions_trim
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
     """Wait for attribute to go into state.

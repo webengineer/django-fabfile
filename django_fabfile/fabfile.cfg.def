@@ -14,6 +14,8 @@ key_pair = foobar
 [main]
 instance_id =
 region = us-east-1
+tag_name =
+tag_value =
 
 [mount_backups]
 username = ubuntu

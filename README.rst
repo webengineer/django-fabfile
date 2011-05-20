@@ -60,6 +60,8 @@ fabfile.cfg help
         [main]
         instance_id = i-foobar
         region = us-east-1
+        tag_name =
+        tag_value =
   2. Section [purge_backups] must contain schedule for saving backups (needed by trim_snapshots command):
      Sample:
         [purge_backups]
@@ -96,3 +98,8 @@ USAGE:
   3. To mount backup specify needed values in [mount_backups] section of fabfile.cfg, specify instance_id and region in [main] section.
      Then run:
           fab -f backup.py mount_snapshot
+  4. To backup all instances in all regions, which tagged with some tag ('Earmarking':'production' for example), add this tags to [main] section of
+     fabfile.cfg and run:
+          fab -f backup.py backup_instances_by_regions
+  5. To purge old snapshots in all regions, run:
+          fab -f backup.py trim_snapshots_for_regions
