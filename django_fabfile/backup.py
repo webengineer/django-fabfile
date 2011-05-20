@@ -23,7 +23,7 @@ from fabric.api import env, prompt, sudo
 
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
-config.readfp(open(config_file))
+config.read(config_file)
 region = config.get('main', 'region')
 instance_id = config.get('main', 'instance_id')
 
@@ -353,17 +353,17 @@ def _select_snapshot():
         else:
             print 'No snapshot with provided ID found'
 
-    #instances_list = list(_get_all_instances(region_name))
-    #instances = dict((inst.id, {'Name': inst.tags.get('Name'),
-                                #'State': inst.state,
-                                #'Launched': inst.launch_time,
-                                #'Key pair': inst.key_name,
-                                #'Type': inst.instance_type,
-                                #'IP Address': inst.ip_address,
-                                #'DNS Name': inst.public_dns_name}
-                     #) for inst in instances_list)
-    #instance_id = _prompt_to_select(instances, 'Select instance ID from',
-                                    #paging=True)
+    instances_list = list(_get_all_instances(region_name))
+    instances = dict((inst.id, {'Name': inst.tags.get('Name'),
+                                'State': inst.state,
+                                'Launched': inst.launch_time,
+                                'Key pair': inst.key_name,
+                                'Type': inst.instance_type,
+                                'IP Address': inst.ip_address,
+                                'DNS Name': inst.public_dns_name}
+                     ) for inst in instances_list)
+    instance_id = _prompt_to_select(instances, 'Select instance ID from',
+                                    paging=True)
 
     all_instances = _get_all_instances(region_name)
     inst = [inst for inst in all_instances if inst.id == instance_id][0]
