@@ -24,10 +24,6 @@ from fabric.api import env, prompt, sudo
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
-region = config.get('main', 'region')
-instance_id = config.get('main', 'instance_id')
-tag_name = config.get('main', 'tag_name')
-tag_value = config.get('main', 'tag_value')
 
 hourly_backups = config.getint('purge_backups', 'hourly_backups')
 daily_backups = config.getint('purge_backups', 'daily_backups')
@@ -62,8 +58,8 @@ def _get_instance_by_id(region, instance_id):
                                                               instance_id))
     return instances[0]
 
-def _get_instance_ids_with_tag(region, tag_name, tag_value):
-    conn = _connect_to_region(region)
+def _get_instance_ids_with_tag(region_name, tag_name, tag_value):
+    conn = _connect_to_region(region_name)
     res = conn.get_all_tags()
     instances_list = []
     for inst in res:
@@ -102,26 +98,27 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     print 'done.'
     return snapshot
 
-def backup_instance_by_tag(region=region,tag_name=tag_name,tag_value=tag_value):
-    """Creates backup for all instances with given tag in region"""
-    if region:
-        _instances_list = _get_instance_ids_with_tag(region, tag_name, tag_value)
+def backup_instances_by_tag(region=None, tag_name=None, tag_value=None):
+    """Creates backup for all instances with given tag in region.
+
+    region
+        will be applied across all regions by default;
+    tag_name, tag_value
+        will be fetched from config by default, may be adjusted per region."""
     snapshots = []
-    for instance_id in _instances_list:
-        if instance_id:
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    for reg in reg_names:
+        tag_name = tag_name or config.get(reg, 'tag_name')
+        tag_value = tag_name or config.get(reg, 'tag_value')
+        instances_list = _get_instance_ids_with_tag(reg, tag_name, tag_value)
+        for instance_id in instances_list:
             instance = _get_instance_by_id(region, instance_id)
-        for dev in instance.block_device_mapping:
-            snapshots.append(create_snapshot(region, instance=instance,
-                                             dev=dev))
+            for dev in instance.block_device_mapping:
+                snapshots.append(create_snapshot(region, instance=instance,
+                                                 dev=dev))
     return snapshots
 
-def backup_instances_by_regions(tag_name=tag_name,tag_value=tag_value):
-    """Creates backups for all instances with matching tags in all regions"""
-    reg_names = (reg.name for reg in _regions())
-    for reg in reg_names:
-        snapshots = backup_instance_by_tag(reg,tag_name,tag_value)
-
-def backup_instance(region=region):
+def backup_instance(region=region, instance_id):
     """Return list of created snapshots for specified instance."""
     instance = _get_instance_by_id(region, instance_id)
     snapshots = []  # NOTE Fabric doesn't supports generators.

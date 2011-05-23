@@ -1,3 +1,7 @@
+[DEFAULT]
+tag_name = Earmarking
+tag_value = production
+
 [purge_backups]
 hourly_backups = 24
 daily_backups = 7
@@ -13,8 +17,6 @@ key_pair = foobar
 [main]
 instance_id =
 region = us-east-1
-tag_name =
-tag_value =
 
 [mount_backups]
 username = ubuntu
