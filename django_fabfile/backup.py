@@ -240,14 +240,14 @@ def _trim_snapshots(
                     if snap_found_for_this_time_period:
                         if not snap.tags.get('preserve_snapshot'):
                             if dry_run:
-                                print('Dry-trimmed snapshot %s (%s)' %
-                                               (snap, snap.start_time))
+                                print('Dry-trimmed %s %s from %s' % (snap,
+                                    snap.description, snap.start_time))
                             else:
                                 # as long as the snapshot wasn't marked with
                                 # the 'preserve_snapshot' tag, delete it:
                                 conn.delete_snapshot(snap.id)
-                                print('Trimmed snapshot %s (%s)' %
-                                          (snap, snap.start_time))
+                                print('Trimmed snapshot %s %s from %s' % (snap,
+                                    snap.description, snap.start_time))
                        # go on and look at the next snapshot,
                        # leaving the time period alone
                     else:
