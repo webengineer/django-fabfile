@@ -262,19 +262,13 @@ def _trim_snapshots(
                    time_period_number += 1
                    snap_found_for_this_time_period = False
 
-def _trim_snapshots_for_regions(dry_run=False):
-    reg_names = (reg.name for reg in _regions())
+
+def trim_snapshots(region=None, dry_run=False):
+    reg_names = [region] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
         regions_trim = _trim_snapshots(region=reg, dry_run=dry_run)
-    return regions_trim
 
-def trim_snapshots(region=None, dry_run=False):
-    if region:
-        trim = _trim_snapshots(region, dry_run=dry_run)
-    else:
-        trim = _trim_snapshots_for_regions(dry_run=dry_run)
-    return trim
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
     """Wait for attribute to go into state.
