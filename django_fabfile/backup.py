@@ -62,7 +62,7 @@ def _get_instance_by_id(region, instance_id):
                                                               instance_id))
     return instances[0]
 
-def _get_instance_by_tag(region, tag_name, tag_value):
+def _get_instance_ids_with_tag(region, tag_name, tag_value):
     conn = _connect_to_region(region)
     res = conn.get_all_tags()
     instances_list = []
@@ -105,7 +105,7 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
 def backup_instance_by_tag(region=region,tag_name=tag_name,tag_value=tag_value):
     """Creates backup for all instances with given tag in region"""
     if region:
-        _instances_list = _get_instance_by_tag(region, tag_name, tag_value)
+        _instances_list = _get_instance_ids_with_tag(region, tag_name, tag_value)
     snapshots = []
     for instance_id in _instances_list:
         if instance_id:
