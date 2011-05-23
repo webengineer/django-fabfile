@@ -119,15 +119,12 @@ def backup_instances_by_tag(region=None, tag_name=None, tag_value=None):
     reg_names = [region] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         tag_name = tag_name or config.get(reg, 'tag_name')
-        tag_value = tag_name or config.get(reg, 'tag_value')
+        tag_value = tag_value or config.get(reg, 'tag_value')
         conn = _connect_to_region(reg)
-        resources = conn.get_all_tags()
-        def is_tagged(inst):
-            return (inst.name == tag_name and inst.value == tag_value and
-                    inst.res_type == 'instance')
-        instances = filter(is_tagged, resources)
-        for inst in instances:
-            snapshots += backup_instance(reg, instance=inst)
+        filters = {'resource-type': 'instance', 'key': tag_name,
+                   'tag-value': tag_value}
+        for tag in conn.get_all_tags(filters=filters):
+            snapshots += backup_instance(reg, instance_id=tag.res_id)
     return snapshots
 
 
