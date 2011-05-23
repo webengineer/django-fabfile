@@ -35,7 +35,6 @@ weekly_backups = config.getint('purge_backups', 'weekly_backups')
 monthly_backups = config.getint('purge_backups', 'monthly_backups')
 quarterly_backups = config.getint('purge_backups', 'quarterly_backups')
 yearly_backups = config.getint('purge_backups', 'yearly_backups')
-dry_run = config.getboolean('purge_backups', 'dry_run')
 
 username = config.get('mount_backups', 'username')
 device = config.get('mount_backups', 'device')
@@ -71,7 +70,6 @@ def _get_instance_by_tag(region, tag_name, tag_value):
         if (inst.name == tag_name and inst.value == tag_value and
             inst.res_type == 'instance'):
             instances_list.append(inst.res_id)
-    #print instances_list
     return instances_list
 
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
@@ -96,7 +94,7 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     for tag in instance.tags:   # Clone intance tags to the snapshot.
         snapshot.add_tag(tag, instance.tags[tag])
     print 'Waiting for the {snap} for {inst} to be completed...'.format(
-                                        snap=snapshot, inst=instance.id)
+                                        snap=snapshot, inst=instance)
     while snapshot.status != 'completed':
         print 'still {snap.status}...'.format(snap=snapshot)
         _sleep(5)
@@ -108,7 +106,6 @@ def backup_instance_by_tag(region=region,tag_name=tag_name,tag_value=tag_value):
     """Creates backup for all instances with given tag in region"""
     if region:
         _instances_list = _get_instance_by_tag(region, tag_name, tag_value)
-        #print _instances_list
     snapshots = []
     for instance_id in _instances_list:
         if instance_id:
@@ -122,7 +119,6 @@ def backup_instances_by_regions(tag_name=tag_name,tag_value=tag_value):
     """Creates backups for all instances with matching tags in all regions"""
     reg_names = (reg.name for reg in _regions())
     for reg in reg_names:
-        #print reg
         snapshots = backup_instance_by_tag(reg,tag_name,tag_value)
 
 def backup_instance(region=region):
@@ -138,7 +134,7 @@ def _trim_snapshots(
     region=region, hourly_backups=hourly_backups, daily_backups=daily_backups,
     weekly_backups=weekly_backups, monthly_backups=monthly_backups,
     quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
-    dry_run=dry_run):
+    dry_run=False):
 
     """Delete snapshots back in time in logarithmic manner.
 
@@ -179,8 +175,6 @@ def _trim_snapshots(
     for year in range(0, yearly_backups):
         target_backup_times.append(other_years- _timedelta(days = year*365))
 
-    #print target_backup_times
-
     one_day = _timedelta(days = 1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
@@ -209,23 +203,19 @@ def _trim_snapshots(
     all_snapshots = conn.get_all_snapshots(owner = 'self')
     # oldest first
     all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time))
-    #print all_snapshots
     snaps_for_each_volume = {}
     for snap in all_snapshots:
         # the snapshot name and the volume name are the same.
         # The snapshot name is set from the volume
         # name at the time the snapshot is taken
         volume_name = snap.volume_id
-        #print volume_name
         if volume_name:
             # only examine snapshots that have a volume name
             snaps_for_volume = snaps_for_each_volume.get(volume_name)
-            #print snaps_for_volume
             if not snaps_for_volume:
                 snaps_for_volume = []
                 snaps_for_each_volume[volume_name] = snaps_for_volume
             snaps_for_volume.append(snap)
-            #print snaps_for_volume
 
     # Do a running comparison of snapshot dates to desired time periods,
     # keeping the oldest snapshot in each
@@ -234,17 +224,14 @@ def _trim_snapshots(
         snaps = snaps_for_each_volume[volume_name]
         snaps = snaps[:-1]
         # never delete the newest snapshot, so remove it from consideration
-        #print snaps
         time_period_number = 0
         snap_found_for_this_time_period = False
         for snap in snaps:
             check_this_snap = True
-            #print snap
             while (check_this_snap and
                   time_period_number < target_backup_times.__len__()):
                 snap_date = datetime.strptime(snap.start_time,
                                       '%Y-%m-%dT%H:%M:%S.000Z')
-                #print snap_date
                 if snap_date < target_backup_times[time_period_number]:
                     # the snap date is before the cutoff date.
                     # Figure out if it's the first snap in this
@@ -252,9 +239,9 @@ def _trim_snapshots(
                     #(since both date the date ranges and the snapshots
                     # are sorted chronologically, we know this
                     #snapshot isn't in an earlier date range):
-                    if snap_found_for_this_time_period == True:
+                    if snap_found_for_this_time_period:
                         if not snap.tags.get('preserve_snapshot'):
-                            if dry_run == True:
+                            if dry_run:
                                 print('Dry-trimmed snapshot %s (%s)' %
                                                (snap, snap.start_time))
                             else:
@@ -274,22 +261,21 @@ def _trim_snapshots(
                 else:
                    # the snap is after the cutoff date.
                    # Check it against the next cutoff date
-                   #print 1
                    time_period_number += 1
                    snap_found_for_this_time_period = False
 
-def trim_snapshots_for_regions():
+def trim_snapshots_for_regions(dry_run=False):
     reg_names = (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
-        regions_trim = _trim_snapshots(region=reg)
+        regions_trim = _trim_snapshots(region=reg, dry_run=dry_run)
     return regions_trim
 
-def trim_snapshots(region=region):
+def trim_snapshots(region=region, dry_run=False):
     if region:
-        trim = _trim_snapshots(region)
+        trim = _trim_snapshots(region, dry_run=dry_run)
     else:
-        trim = trim_snapshots_for_regions()
+        trim = trim_snapshots_for_regions(dry_run=dry_run)
     return trim
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):

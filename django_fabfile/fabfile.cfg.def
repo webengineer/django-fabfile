@@ -1,5 +1,4 @@
 [purge_backups]
-dry_run = False
 hourly_backups = 24
 daily_backups = 7
 weekly_backups = 4
