@@ -24,6 +24,9 @@ from fabric.api import env, prompt, sudo
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
+for region in _regions():
+    if not config.has_section(region.name):
+        config.add_section(region.name)
 
 hourly_backups = config.getint('purge_backups', 'hourly_backups')
 daily_backups = config.getint('purge_backups', 'daily_backups')
