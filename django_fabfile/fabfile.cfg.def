@@ -7,8 +7,8 @@ hourly_backups = 24
 daily_backups = 7
 weekly_backups = 4
 monthly_backups = 12
-yearly_backups = 10
 quarterly_backups = 4
+yearly_backups = 10
 
 [us-east-1]
 key_filename = /foo/bar/key.pem

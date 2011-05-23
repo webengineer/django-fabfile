@@ -58,16 +58,6 @@ def _get_instance_by_id(region, instance_id):
                                                               instance_id))
     return instances[0]
 
-def _get_instance_ids_with_tag(region_name, tag_name, tag_value):
-    conn = _connect_to_region(region_name)
-    res = conn.get_all_tags()
-    instances_list = []
-    for inst in res:
-        if (inst.name == tag_name and inst.value == tag_value and
-            inst.res_type == 'instance'):
-            instances_list.append(inst.res_id)
-    return instances_list
-
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     """Return newly created snapshot of specified instance device.
 
@@ -98,37 +88,48 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     print 'done.'
     return snapshot
 
-def backup_instances_by_tag(region=None, tag_name=None, tag_value=None):
-    """Creates backup for all instances with given tag in region.
 
-    region
-        will be applied across all regions by default;
-    tag_name, tag_value
-        will be fetched from config by default, may be adjusted per region."""
-    snapshots = []
-    reg_names = [region] if region else (reg.name for reg in _regions())
-    for reg in reg_names:
-        tag_name = tag_name or config.get(reg, 'tag_name')
-        tag_value = tag_name or config.get(reg, 'tag_value')
-        instances_list = _get_instance_ids_with_tag(reg, tag_name, tag_value)
-        for instance_id in instances_list:
-            instance = _get_instance_by_id(region, instance_id)
-            for dev in instance.block_device_mapping:
-                snapshots.append(create_snapshot(region, instance=instance,
-                                                 dev=dev))
-    return snapshots
+def backup_instance(region, instance_id=None, instance=None):
+    """Return list of created snapshots for specified instance.
 
-def backup_instance(region=region, instance_id):
-    """Return list of created snapshots for specified instance."""
-    instance = _get_instance_by_id(region, instance_id)
+    instance, instance_id
+        either `instance_id` or `instance` argument should be specified."""
+    assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
+        'instance should be specified')
+    if instance_id:
+        instance = _get_instance_by_id(region, instance_id)
     snapshots = []  # NOTE Fabric doesn't supports generators.
     for dev in instance.block_device_mapping:
         snapshots.append(create_snapshot(region, instance=instance, dev=dev))
     return snapshots
 
 
+def backup_instances_by_tag(region=None, tag_name=None, tag_value=None):
+    """Creates backup for all instances with given tag in region.
+
+    region
+        will be applied across all regions by default;
+    tag_name, tag_value
+        will be fetched from config by default, may be configured
+        per region."""
+    snapshots = []
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    for reg in reg_names:
+        tag_name = tag_name or config.get(reg, 'tag_name')
+        tag_value = tag_name or config.get(reg, 'tag_value')
+        conn = _connect_to_region(reg)
+        resources = conn.get_all_tags()
+        def is_tagged(inst):
+            return (inst.name == tag_name and inst.value == tag_value and
+                    inst.res_type == 'instance')
+        instances = filter(is_tagged, resources)
+        for inst in instances:
+            snapshots += backup_instance(reg, instance=inst)
+    return snapshots
+
+
 def _trim_snapshots(
-    region=region, hourly_backups=hourly_backups, daily_backups=daily_backups,
+    region, hourly_backups=hourly_backups, daily_backups=daily_backups,
     weekly_backups=weekly_backups, monthly_backups=monthly_backups,
     quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
     dry_run=False):
@@ -261,18 +262,18 @@ def _trim_snapshots(
                    time_period_number += 1
                    snap_found_for_this_time_period = False
 
-def trim_snapshots_for_regions(dry_run=False):
+def _trim_snapshots_for_regions(dry_run=False):
     reg_names = (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
         regions_trim = _trim_snapshots(region=reg, dry_run=dry_run)
     return regions_trim
 
-def trim_snapshots(region=region, dry_run=False):
+def trim_snapshots(region=None, dry_run=False):
     if region:
         trim = _trim_snapshots(region, dry_run=dry_run)
     else:
-        trim = trim_snapshots_for_regions(dry_run=dry_run)
+        trim = _trim_snapshots_for_regions(dry_run=dry_run)
     return trim
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
