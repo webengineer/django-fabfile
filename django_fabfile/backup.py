@@ -332,7 +332,7 @@ def create_instance(region_name='us-east-1', zone_name=None):
     zone = zone_name or conn.get_all_zones()[-1].name
     print 'Launching new instance in {zone} from {image}'.format(image=image,
                                                                  zone=zone)
-    key_pair = config.get(region, 'key_pair')
+    key_pair = config.get(region_name, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=zone)
     print '{res.instances[0]} created in {zone}.'.format(res=reservation,
