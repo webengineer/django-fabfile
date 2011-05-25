@@ -392,9 +392,8 @@ def _get_all_snapshots(region=None, id_only=False):
 
 
 def _select_snapshot():
-
-    region_name = region
-
+    region_name = _prompt_to_select([reg.name for reg in _regions()],
+                                        'Select region from')
     snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
                      'otherwise)')
     if snap_id:
