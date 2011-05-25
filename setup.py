@@ -8,7 +8,7 @@ setup(
     name='django-fabfile',
     url='http://redmine.odeskps.com/projects/django-fabfile',
     download_url='http://pypi.odeskps.com/django-fabfile',
-    version='0.9.6.5',
+    version='0.9.6.7',
     description='Deployment Django projects with Fabric.',
     install_requires=[
         'boto>=2.0b4',
@@ -19,6 +19,9 @@ setup(
     maintainer_email='yyurevich@jellycrystal.com',
     packages=find_packages(),
     include_package_data=False,
+    package_data = {
+        '': ['*.rst', '*.def'],
+    },
     zip_safe=True,
     # Get more strings from http://www.python.org/pypi?:action=list_classifiers
     classifiers=[
