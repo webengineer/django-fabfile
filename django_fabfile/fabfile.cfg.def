@@ -11,12 +11,8 @@ quarterly_backups = 4
 yearly_backups = 10
 
 [us-east-1]
-key_filename = /foo/bar/key.pem
-key_pair = foobar
-
-[main]
-instance_id =
-region = us-east-1
+key_filename = /home/username/.ssh/regional_username_rsa
+key_pair = regional-username
 
 [mount_backups]
 username = ubuntu
