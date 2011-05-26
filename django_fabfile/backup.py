@@ -16,7 +16,8 @@ from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
-from boto.exception import BotoServerError as _BotoServerError
+from boto.exception import (BotoServerError as _BotoServerError,
+    EC2ResponseError as _EC2ResponseError)
 import os, sys
 from fabric.api import env, prompt, sudo
 
@@ -245,9 +246,13 @@ def _trim_snapshots(
                             else:
                                 # as long as the snapshot wasn't marked with
                                 # the 'preserve_snapshot' tag, delete it:
-                                conn.delete_snapshot(snap.id)
-                                print('Trimmed snapshot %s %s from %s' % (snap,
-                                    snap.description, snap.start_time))
+                                try:
+                                    conn.delete_snapshot(snap.id)
+                                except _EC2ResponseError as err:
+                                    print str(err)
+                                else:
+                                    print('Trimmed %s %s from %s' % (snap,
+                                        snap.description, snap.start_time))
                        # go on and look at the next snapshot,
                        # leaving the time period alone
                     else:
