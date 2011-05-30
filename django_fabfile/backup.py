@@ -28,12 +28,14 @@ for region in _regions():
     if not config.has_section(region.name):
         config.add_section(region.name)
 
+
 hourly_backups = config.getint('purge_backups', 'hourly_backups')
 daily_backups = config.getint('purge_backups', 'daily_backups')
 weekly_backups = config.getint('purge_backups', 'weekly_backups')
 monthly_backups = config.getint('purge_backups', 'monthly_backups')
 quarterly_backups = config.getint('purge_backups', 'quarterly_backups')
 yearly_backups = config.getint('purge_backups', 'yearly_backups')
+
 
 username = config.get('mount_backups', 'username')
 device = config.get('mount_backups', 'device')
@@ -60,6 +62,7 @@ def _get_instance_by_id(region, instance_id):
         'Returned more than 1 {0} for instance_id {1}'.format(instances,
                                                               instance_id))
     return instances[0]
+
 
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     """Return newly created snapshot of specified instance device.
@@ -173,6 +176,7 @@ def _trim_snapshots(
     for year in range(0, yearly_backups):
         target_backup_times.append(other_years- _timedelta(days = year*365))
 
+
     one_day = _timedelta(days = 1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
@@ -201,19 +205,23 @@ def _trim_snapshots(
     all_snapshots = conn.get_all_snapshots(owner = 'self')
     # oldest first
     all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time))
+
     snaps_for_each_volume = {}
     for snap in all_snapshots:
         # the snapshot name and the volume name are the same.
         # The snapshot name is set from the volume
         # name at the time the snapshot is taken
         volume_name = snap.volume_id
+
         if volume_name:
             # only examine snapshots that have a volume name
             snaps_for_volume = snaps_for_each_volume.get(volume_name)
+
             if not snaps_for_volume:
                 snaps_for_volume = []
                 snaps_for_each_volume[volume_name] = snaps_for_volume
             snaps_for_volume.append(snap)
+
 
     # Do a running comparison of snapshot dates to desired time periods,
     # keeping the oldest snapshot in each
@@ -222,14 +230,17 @@ def _trim_snapshots(
         snaps = snaps_for_each_volume[volume_name]
         snaps = snaps[:-1]
         # never delete the newest snapshot, so remove it from consideration
+
         time_period_number = 0
         snap_found_for_this_time_period = False
         for snap in snaps:
             check_this_snap = True
+
             while (check_this_snap and
                   time_period_number < target_backup_times.__len__()):
                 snap_date = datetime.strptime(snap.start_time,
                                       '%Y-%m-%dT%H:%M:%S.000Z')
+
                 if snap_date < target_backup_times[time_period_number]:
                     # the snap date is before the cutoff date.
                     # Figure out if it's the first snap in this
@@ -259,6 +270,7 @@ def _trim_snapshots(
                 else:
                    # the snap is after the cutoff date.
                    # Check it against the next cutoff date
+
                    time_period_number += 1
                    snap_found_for_this_time_period = False
 
@@ -268,6 +280,7 @@ def trim_snapshots(region=None, dry_run=False):
     for reg in reg_names:
         print reg
         regions_trim = _trim_snapshots(region=reg, dry_run=dry_run)
+
 
 
 def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
@@ -292,8 +305,8 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
     print 'done.'
 
 
-def create_instance(region_name='us-east-1', zone_name=None):
-
+def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
+                                                    ,security_group='default'):
     """Create AWS EC2 instance.
 
     Return created instance.
@@ -332,9 +345,11 @@ def create_instance(region_name='us-east-1', zone_name=None):
     zone = zone_name or conn.get_all_zones()[-1].name
     print 'Launching new instance in {zone} from {image}'.format(image=image,
                                                                  zone=zone)
-    key_pair = config.get(region_name, 'key_pair')
+
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
-                            placement=zone)
+                            placement=zone,security_groups=['default',
+                            security_group])
+
     print '{res.instances[0]} created in {zone}.'.format(res=reservation,
                                                          zone=zone)
 
@@ -344,14 +359,12 @@ def create_instance(region_name='us-east-1', zone_name=None):
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
-
     """Prompt to select an option from provided choices.
 
     choices: list or dict. If dict, then choice will be made among keys.
     paging: render long list with pagination.
 
     Return solely possible value instantly without prompting."""
-
     keys = list(choices)
     while keys.count(None):
         keys.pop(choices.index(None))    # Remove empty values.
@@ -451,9 +464,10 @@ def mount_snapshot(region=None, snap_id=None):
                 vol=volume, snap=snap, zone=zone)
 
             try:
-                inst = create_instance(zone.region.name, zone.name)
+                key_pair = config.get(region, 'key_pair')
+                inst = create_instance(zone.region.name, zone.name,key_pair)
                 _wait_for(inst, ['state',], 'running')
-
+                device = '/dev/sdk'
                 attach = volume.attach(inst.id, device)
                 volume.update()
                 _wait_for(volume, ['attach_data', 'status'], 'attached')
@@ -477,6 +491,7 @@ def mount_snapshot(region=None, snap_id=None):
                 info = ('\nYou may now SSH into the {inst} server, using:'
                         '\n ssh -i {key} {user}@{inst.public_dns_name}')
                 try:
+                    device = '/dev/xvdk' # For natty must be xvd* disk name
                     sudo('mount {dev} {mnt}'.format(dev=device, mnt=mountpoint))
                 except:
                     info += ('\nand mount {device}. NOTE: device name may be '
@@ -516,3 +531,271 @@ def mount_snapshot(region=None, snap_id=None):
             continue
         else:
             break
+
+def move_snapshot(region_name=None, reserve_region=None,
+                 instance_id=None, instance=None,
+                 zone_name=None, snap_id=None, res_snap_id=None):
+    """
+    You must specify region_name and reserve_region for backup.
+    If you already have backups in reserve_region - snapshot
+    for specified instance will be mounted, updated and re-created
+    """
+    if not region_name:
+        region_name = _prompt_to_select([reg.name for reg in _regions()],
+                                    'Select source region from')
+
+    if not instance_id:
+        instances_list = list(_get_all_instances(region_name))
+        instances = dict((inst.id, {'Name': inst.tags.get('Name'),
+                                    'State': inst.state,
+                                    'Launched': inst.launch_time,
+                                    'Key pair': inst.key_name,
+                                    'Type': inst.instance_type,
+                                    'IP Address': inst.ip_address,
+                                    'DNS Name': inst.public_dns_name}
+                        ) for inst in instances_list)
+        instance_id = _prompt_to_select(instances, 'Select instance ID from',
+                                        paging=True)
+    all_instances = _get_all_instances(region_name)
+    inst = [inst for inst in all_instances if inst.id == instance_id][0]
+    volumes = dict((dev.volume_id, {'Status': dev.status,
+                                    'Attached': dev.attach_time,
+                                    'Size': dev.size,
+                                    'Snapshot ID': dev.snapshot_id}
+                   ) for dev in inst.block_device_mapping.values())
+    volume_id = _prompt_to_select(volumes, 'Select volume ID from',
+                                                          paging=True)
+    if not reserve_region:
+        reserve_region = _prompt_to_select([reg.name for reg in _regions()],
+                                    'Select backup region from')
+    all_snaps = _get_all_snapshots(region_name)
+    snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
+    snaps = dict((snap.id, {'Volume': snap.volume_id,
+                            'Date': snap.start_time,
+                            'Description': snap.description}
+                 ) for snap in snaps_list)
+    snap_id = _prompt_to_select(snaps, 'Select source snapshot ID from',
+                                          paging=True)
+
+    conn = _connect_to_region(region_name)
+    if reserve_region:
+        conn_reserve = _connect_to_region(reserve_region)
+        try:
+            conn_reserve.delete_key_pair('transfer_snapshot')
+            conn_reserve.delete_security_group('transfer_snapshot')
+        except:
+            pass
+        key_pair_reserve = conn_reserve.create_key_pair('transfer_snapshot')
+        reserve_secuity_group = conn_reserve.create_security_group(
+                      'transfer_snapshot', 'Group for opening ssh')
+        reserve_secuity_group.authorize('tcp','22','22','0.0.0.0/0')
+        if os.path.exists('./transfer_snapshot.pem'):
+            os.system('rm ./transfer_snapshot.pem')
+        key_pair_reserve.save('./')
+        reserve_zone = conn_reserve.get_all_zones()[0].name
+        _reserve_zone = conn_reserve.get_all_zones()[0]
+        os.system('chmod 600 ./transfer_snapshot.pem')
+
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
+
+    filters = {'resource-type': 'snapshot', 'key': 'Source',
+                   'tag-value': 'Created for {0} from {1}'.format(instance_id,
+                                                        region_name)}
+
+    res_snaps_list = (snap for snap in conn_reserve.get_all_tags(
+                                                filters=filters))
+    res_snaps = dict((snap.res_id, {}
+             ) for snap in res_snaps_list)
+    if res_snaps:
+        res_snap_id = _prompt_to_select(res_snaps,
+                  'Select backup snapshot ID from',
+                                      paging=True)
+    res_snap = None
+    if res_snap_id:
+        res_snap = conn_reserve.get_all_snapshots(
+                                    snapshot_ids=[res_snap_id,])[0]
+
+    def _mount_snapshot_in_zone(snap_id, zone):
+        volume = inst = None
+        volume_reserve = inst_reserve = None
+        try:
+            volume = conn.create_volume(
+                snapshot=snap.id, size=snap.volume_size, zone=zone)
+            print 'New {vol} created from {snap} in {zone}.'.format(
+                vol=volume, snap=snap, zone=zone)
+            if res_snap:
+                volume_reserve = conn_reserve.create_volume(
+             snapshot=res_snap.id,size=res_snap.volume_size,
+                                                      zone=reserve_zone)
+                print 'New {vol} created from {snap} in {zone}.'.format(
+                    vol=volume_reserve, snap=res_snap, zone=reserve_zone)
+            else:
+                volume_reserve = conn_reserve.create_volume(
+                    size=snap.volume_size, zone=reserve_zone)
+                print 'New {vol} created in {zone}.'.format(
+                    vol=volume_reserve, zone=reserve_zone)
+            try:
+                key_pair = config.get(region_name, 'key_pair')
+                inst = create_instance(zone.region.name, zone.name,key_pair)
+                _wait_for(inst, ['state',], 'running')
+                inst_reserve = create_instance(_reserve_zone.region.name,
+                              _reserve_zone.name,
+                              key_pair_reserve.name,'transfer_snapshot')
+                _wait_for(inst_reserve, ['state',], 'running')
+                device = '/dev/sdk'
+                attach = volume.attach(inst.id, device)
+                volume.update()
+                _wait_for(volume, ['attach_data', 'status'], 'attached')
+                print 'Volume is attached to {inst} as {dev}.'.format(
+                    inst=inst, dev=device)
+                attach_reserve = volume_reserve.attach(
+                                                  inst_reserve.id, device)
+                volume_reserve.update()
+                _wait_for(volume_reserve,
+                                    ['attach_data', 'status'], 'attached')
+                print 'Volume is attached to {inst_reserve} as {dev}.'.format(
+                    inst_reserve=inst_reserve, dev=device)
+                key_filename = config.get(zone.region.name, 'key_filename')
+                env.update({
+                    'host_string': inst.public_dns_name,
+                    'key_filename': key_filename,
+                    'load_known_hosts': False,
+                    'user': username,
+                })
+                while True:
+                    try:
+                        sudo('mkdir {mnt}'.format(mnt=mountpoint))
+                        break
+                    except:
+                        print 'sshd still launching, waiting to try again...'
+                        _sleep(5)
+                info = ('\nYou may now SSH into the {inst} server, using:'
+                        '\n ssh -i {key} {user}@{inst.public_dns_name}')
+                try:
+                    device = '/dev/xvdk'
+                    sudo('mount {dev} {mnt}'.format(dev=device,
+                                                mnt=mountpoint))
+                    transfer_key = '/root/transfer_snapshot.pem'
+                    os.system('scp -i {key_filename} '
+                    '-o StrictHostKeyChecking=no '
+                    './transfer_snapshot.pem '
+                    '{user}@{host}:/home/ubuntu/transfer_snapshot.pem'.format(
+                        user=username,
+                         host=inst.public_dns_name,key_filename=key_filename))
+                except:
+                    info += ('\nand mount {device}. NOTE: device name may be '
+                             'modified by system.')
+                else:
+                    info += ('\nand browse mounted at {mountpoint} backup '
+                             'volume {device}.')
+                print info.format(inst=inst, device=device, key=key_filename,
+                                  user=username, mountpoint=mountpoint)
+
+                key_filename_reserve = (os.getcwd()+'/transfer_snapshot.pem')
+                env.update({
+                    'host_string': inst_reserve.public_dns_name,
+                    'key_filename': key_filename_reserve,
+                    'load_known_hosts': False,
+                    'user': username,
+                })
+                while True:
+                    try:
+                        sudo('mkdir {mnt}'.format(mnt=mountpoint))
+                        break
+                    except:
+                        print 'sshd still launching, waiting to try again...'
+                        _sleep(5)
+                info = ('\nYou may now SSH into'
+                        'the {inst_reserve} server, using:'
+                        '\n ssh -i {key} '
+                        '{user}@{inst_reserve.public_dns_name}')
+                try:
+                    device = '/dev/xvdk'
+                    if not res_snap:
+                        sudo('mkfs.ext3 {dev}'.format(dev=device))
+                    sudo('rm /root/.ssh/authorized_keys')
+                    sudo('cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/')
+                except:
+                    info += ('\nand create fs on {device}.')
+                try:
+                    device = '/dev/xvdk'
+                    sudo('mount {dev} {mnt}'.format(dev=device,
+                                                          mnt=mountpoint))
+                except:
+                    info += ('\nand mount {device}. NOTE: device name may be '
+                             'modified by system.')
+                else:
+                    info += ('\nand browse mounted at {mountpoint} backup '
+                             'volume {device}.')
+                print info.format(inst_reserve=inst_reserve, device=device,
+                key=key_filename_reserve, user=username,
+                                                    mountpoint=mountpoint)
+                env.update({
+                    'host_string': inst.public_dns_name,
+                    'key_filename': key_filename,
+                    'load_known_hosts': False,
+                    'user': username,
+                })
+                # SYNCHRONISATION!!!
+                sudo('rsync -e "ssh -i /home/ubuntu/transfer_snapshot.pem '
+                '-o StrictHostKeyChecking=no" -ar --delete '
+                '/media/snapshot root@{rhost}:/media'
+                ' '.format(rhost=inst_reserve.public_dns_name))
+                # SNAPSHOTIZATION!!!
+                description = 'Created for {0} from {1}'.format(instance_id,
+                                                        zone.region.name)
+                if inst.tags.get('Name'):
+                    description += ' named as {0}'.format(inst.tags['Name'])
+                reserved_snapshot = volume_reserve.create_snapshot(
+                                                                description)
+                for tag in snap.tags:# Clone intance tags to the snapshot.
+                    reserved_snapshot.add_tag(tag, snap.tags[tag])
+                    reserved_snapshot.add_tag('Dest', 'Backup snapshots')
+                    reserved_snapshot.add_tag('Source', 'Created for {0} from {1}'.format(instance_id,
+                                                        zone.region.name))
+                print 'Waiting for the {snap} to be completed...'.format(
+                                        snap=reserved_snapshot)
+                while reserved_snapshot.status != 'completed':
+                    print 'still {snap.status}...'.format(
+                                    snap=reserved_snapshot)
+                    _sleep(5)
+                    reserved_snapshot.update()
+                print 'done.'
+                info = ('\nEnter FINISHED if you are finished looking at the '
+                        'backup and would like to cleanup: ')
+                while raw_input(info).strip() != 'FINISHED':
+                    pass
+            # Cleanup processing: terminate temporary server.
+            finally:
+                if inst and inst_reserve:
+                    print 'Deleting the {0}...'.format(inst)
+                    inst.terminate()
+                    print 'Deleting the {0}...'.format(inst_reserve)
+                    inst_reserve.terminate()
+                    conn_reserve.delete_key_pair('snapshot_transfer')
+                print 'done.'
+        # Cleanup processing: delete detached backup volume.
+        finally:
+            if volume and volume_reserve:
+                _wait_for(volume, ['status',], 'available')
+                print 'Deleting the backup {vol}...'.format(vol=volume)
+                delete = volume.delete()
+                _wait_for(volume_reserve, ['status',], 'available')
+                reserve_secuity_group.delete()
+                print 'Deleting the backup {vol}...'.format(
+                                                        vol=volume_reserve)
+                delete = volume_reserve.delete()
+                if res_snap:
+                    print 'Deleting old snap {sn}...'.format(sn=res_snap.id)
+                    delete = res_snap.delete()
+                os.system('rm ./transfer_snapshot.pem')
+
+    for zone in conn.get_all_zones():
+        try:
+            _mount_snapshot_in_zone(snap_id, zone)
+        except _BotoServerError, err:
+            print '{0} in {1}'.format(err, zone)
+            continue
+        else:
+            break
+
