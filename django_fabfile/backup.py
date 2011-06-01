@@ -535,6 +535,7 @@ def mount_snapshot(region=None, snap_id=None):
 
 # FIXME Function up to 50 lines lenght easier to understand.
 # FIXME `zone_name` argument is not used.
+# FIXME `snap_id` is overwritten.
 def move_snapshot(region_name=None, reserve_region=None,
                  instance_id=None, instance=None,
                  zone_name=None, snap_id=None, res_snap_id=None):
