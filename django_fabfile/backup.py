@@ -532,6 +532,9 @@ def mount_snapshot(region=None, snap_id=None):
         else:
             break
 
+
+# FIXME Function up to 50 lines lenght easier to understand.
+# FIXME `zone_name` argument is not used.
 def move_snapshot(region_name=None, reserve_region=None,
                  instance_id=None, instance=None,
                  zone_name=None, snap_id=None, res_snap_id=None):
@@ -540,7 +543,8 @@ def move_snapshot(region_name=None, reserve_region=None,
     If you already have backups in reserve_region - snapshot
     for specified instance will be mounted, updated and re-created
     """
-    if not region_name:
+    if not region_name:     # FIXME Slightly modified _select_snapshot()
+                            # can be used here.
         region_name = _prompt_to_select([reg.name for reg in _regions()],
                                     'Select source region from')
 
@@ -578,7 +582,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                                           paging=True)
 
     conn = _connect_to_region(region_name)
-    if reserve_region:
+    if reserve_region:  # FIXME Always True.
         conn_reserve = _connect_to_region(reserve_region)
         try:
             conn_reserve.delete_key_pair('transfer_snapshot')
@@ -604,8 +608,7 @@ def move_snapshot(region_name=None, reserve_region=None,
 
     res_snaps_list = (snap for snap in conn_reserve.get_all_tags(
                                                 filters=filters))
-    res_snaps = dict((snap.res_id, {}
-             ) for snap in res_snaps_list)
+    res_snaps = dict((snap.res_id, {}) for snap in res_snaps_list)
     if res_snaps:
         res_snap_id = _prompt_to_select(res_snaps,
                   'Select backup snapshot ID from',
@@ -615,6 +618,8 @@ def move_snapshot(region_name=None, reserve_region=None,
         res_snap = conn_reserve.get_all_snapshots(
                                     snapshot_ids=[res_snap_id,])[0]
 
+    # FIXME Code from the above inner function
+    # mount_snapshot._mount_snapshot_in_zone should be reused below.
     def _mount_snapshot_in_zone(snap_id, zone):
         volume = inst = None
         volume_reserve = inst_reserve = None
@@ -682,7 +687,8 @@ def move_snapshot(region_name=None, reserve_region=None,
                     '{user}@{host}:/home/ubuntu/transfer_snapshot.pem'.format(
                         user=username,
                          host=inst.public_dns_name,key_filename=key_filename))
-                except:
+                except:     # FIXME Steps should be accomplished without
+                            # user intervention.
                     info += ('\nand mount {device}. NOTE: device name may be '
                              'modified by system.')
                 else:
@@ -750,6 +756,8 @@ def move_snapshot(region_name=None, reserve_region=None,
                                                                 description)
                 for tag in snap.tags:# Clone intance tags to the snapshot.
                     reserved_snapshot.add_tag(tag, snap.tags[tag])
+                    # FIXME Following steps shouldn't be iterated for
+                    # each `snap.tags`.
                     reserved_snapshot.add_tag('Dest', 'Backup snapshots')
                     reserved_snapshot.add_tag('Source', 'Created for {0} from {1}'.format(instance_id,
                                                         zone.region.name))
@@ -799,3 +807,9 @@ def move_snapshot(region_name=None, reserve_region=None,
         else:
             break
 
+# TODO Snapshots should be filtered by "Earmarking: production"
+# tag, which is copied from snapshotted instance. Latest snapshot for
+# the same `volume_id` should be rsynced - i.e. reserved snapshot should
+# be located by tag and `volume_id` automatically. Thus only two
+# arguments should be used by upper function - source and destination
+# region names.
