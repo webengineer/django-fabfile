@@ -22,7 +22,7 @@ ami_ptrn_with_relase_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{relea
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 architecture = x86_64
 mountpoint = /media/snapshot
-device = /dev/sdm
+device = /dev/sdm   # TODO remove
 ami_ptrn = ebs/ubuntu-images/ubuntu-*-server-*
 ubuntu_aws_account = 099720109477
 

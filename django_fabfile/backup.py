@@ -8,17 +8,20 @@ All other options will be taken from ./fabfile.cfg file.
 
 from datetime import timedelta as _timedelta, datetime
 from ConfigParser import ConfigParser as _ConfigParser
+from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile, match as _match
+from string import lowercase
 from time import sleep as _sleep
 from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.exception import BotoServerError as _BotoServerError
-import os, sys
+import os
+import sys
 from fabric.api import env, prompt, sudo
 
 
@@ -52,6 +55,56 @@ ami_ptrn_with_relase_date = config.get('mount_backups',
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 
+def _prompt_to_select(choices, query='Select from', paging=False):
+    """Prompt to select an option from provided choices.
+
+    choices: list or dict. If dict, then choice will be made among keys.
+    paging: render long list with pagination.
+
+    Return solely possible value instantly without prompting."""
+    keys = list(choices)
+    while keys.count(None):
+        keys.pop(choices.index(None))    # Remove empty values.
+    assert len(keys), 'No choices provided'
+
+    if len(keys) == 1:
+        return keys[0]
+
+    picked = None
+    while not picked in keys:
+        if paging:
+            pp = _PrettyPrinter()
+            _pager(query + '\n' + pp.pformat(choices))
+            text = 'Enter your choice or press Return to view options again'
+        else:
+            text = '{query} {choices}'.format(query=query, choices=choices)
+        picked = prompt(text)
+    return picked
+
+
+def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
+    """Wait for attribute to go into state.
+
+    attrs
+        list of nested attribute names;
+    update_attr
+        will be called to refresh state."""
+    print 'Waiting for the {0} to be {1}...'.format(obj, state)
+
+    def get_nested_attr(obj, attrs):
+        attr = obj
+        for attr_name in attrs:
+            attr = getattr(attr, attr_name)
+        return attr
+    sleep_for = 3
+    while get_nested_attr(obj, attrs) != state:
+        print 'still {0}...'.format(get_nested_attr(obj, attrs))
+        sleep_for += 2
+        _sleep(min(sleep_for, max_sleep))
+        getattr(obj, update_attr)()
+    print 'done.'
+
+
 def _get_region_by_name(region_name):
     """Allow to specify region name fuzzyly."""
     matched = [reg for reg in _regions() if _match(region_name, reg.name)]
@@ -62,7 +115,7 @@ def _get_region_by_name(region_name):
 
 def _get_instance_by_id(region, instance_id):
     conn = _connect_to_region(region)
-    res = conn.get_all_instances([instance_id,])
+    res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
                                                       instance_id))
@@ -71,6 +124,71 @@ def _get_instance_by_id(region, instance_id):
         'Returned more than 1 {0} for instance_id {1}'.format(instances,
                                                               instance_id))
     return instances[0]
+
+
+def _get_all_instances(region=None, id_only=False):
+    if not region:
+        _warn('There is no guarantee of instance id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    connections = (_connect_to_region(reg) for reg in reg_names)
+    for con in connections:
+        for res in con.get_all_instances():
+            for inst in res.instances:
+                yield inst.id if id_only else inst
+
+
+def _get_all_snapshots(region=None, id_only=False):
+    if not region:
+        _warn('There is no guarantee of snapshot id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in _regions())
+    connections = (_connect_to_region(reg) for reg in reg_names)
+    for con in connections:
+        for snap in con.get_all_snapshots(owner='self'):
+            yield snap.id if id_only else snap
+
+
+def _select_snapshot():
+    region_name = _prompt_to_select([reg.name for reg in _regions()],
+                                        'Select region from')
+    snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
+                     'otherwise)')
+    if snap_id:
+        if snap_id in _get_all_snapshots(region_name, id_only=True):
+            return region_name, snap_id
+        else:
+            print 'No snapshot with provided ID found'
+
+    instances_list = list(_get_all_instances(region_name))
+    instances = dict((inst.id, {
+        'Name': inst.tags.get('Name'),
+        'State': inst.state,
+        'Launched': inst.launch_time,
+        'Key pair': inst.key_name,
+        'Type': inst.instance_type,
+        'IP Address': inst.ip_address,
+        'DNS Name': inst.public_dns_name}) for inst in instances_list)
+    instance_id = _prompt_to_select(instances, 'Select instance ID from',
+                                    paging=True)
+
+    all_instances = _get_all_instances(region_name)
+    inst = [inst for inst in all_instances if inst.id == instance_id][0]
+    volumes = dict((dev.volume_id, {
+        'Status': dev.status,
+        'Attached': dev.attach_time,
+        'Size': dev.size,
+        'Snapshot ID': dev.snapshot_id}) for dev in
+                                            inst.block_device_mapping.values())
+    volume_id = _prompt_to_select(volumes, 'Select volume ID from',
+                                  paging=True)
+
+    all_snaps = _get_all_snapshots(region_name)
+    snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
+    snaps = dict((snap.id, {'Volume': snap.volume_id,
+                            'Date': snap.start_time,
+                            'Description': snap.description}) for snap in
+                                                                    snaps_list)
+    return region_name, _prompt_to_select(snaps, 'Select snapshot ID from',
+                                          paging=True)
 
 
 def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
@@ -268,20 +386,18 @@ def _trim_snapshots(
                                 conn.delete_snapshot(snap.id)
                                 print('Trimmed snapshot %s %s from %s' % (snap,
                                     snap.description, snap.start_time))
-                       # go on and look at the next snapshot,
-                       # leaving the time period alone
+                        # go on and look at the next snapshot,
+                        # leaving the time period alone
                     else:
-                      # this was the first snapshot found for this time period
-                       # Leave it alone and look at the
-                       # next snapshot:
-                       snap_found_for_this_time_period = True
+                        # this was the first snapshot found for this time
+                        # period. Leave it alone and look at the next snapshot:
+                        snap_found_for_this_time_period = True
                     check_this_snap = False
                 else:
-                   # the snap is after the cutoff date.
-                   # Check it against the next cutoff date
-
-                   time_period_number += 1
-                   snap_found_for_this_time_period = False
+                    # the snap is after the cutoff date.
+                    # Check it against the next cutoff date
+                    time_period_number += 1
+                    snap_found_for_this_time_period = False
 
 
 def trim_snapshots(region=None, dry_run=False):
@@ -291,31 +407,8 @@ def trim_snapshots(region=None, dry_run=False):
         regions_trim = _trim_snapshots(region=reg, dry_run=dry_run)
 
 
-
-def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
-    """Wait for attribute to go into state.
-
-    attrs
-        list of nested attribute names;
-    update_attr
-        will be called to refresh state."""
-    print 'Waiting for the {0} to be {1}...'.format(obj, state)
-    def get_nested_attr(obj, attrs):
-        attr = obj
-        for attr_name in attrs:
-            attr = getattr(attr, attr_name)
-        return attr
-    sleep_for = 3
-    while get_nested_attr(obj, attrs) != state:
-        print 'still {0}...'.format(get_nested_attr(obj, attrs))
-        sleep_for += 2
-        _sleep(min(sleep_for, max_sleep))
-        getattr(obj, update_attr)()
-    print 'done.'
-
-
-def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
-                                                    ,security_group='default'):
+def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
+                    security_group='default'):
     """Create AWS EC2 instance.
 
     Return created instance.
@@ -323,7 +416,12 @@ def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
     region_name
         by default will be created in the us-east-1 region;
     zone
-        string-formatted name. By default will be used latest zone."""
+        string-formatted name. By default will be used latest zone;
+    key_pair
+        name of key_pair to be granted access. Will be fetched from
+        config by default, may be configured per region."""
+
+    # TODO Allow only zone_name to be passed.
 
     info = ('Please enter keypair name in the {0} region for person who will '
             'access the instance').format(region_name)
@@ -338,8 +436,10 @@ def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
     # Filtering by latest version.
     ptrn = _compile(ami_regexp)
     versions = set([ptrn.search(img.name).group('version') for img in images])
+
     def complement(year_month):
         return '0' + year_month if len(year_month) == 4 else year_month
+
     latest_version = sorted(set(filter(complement, versions)))[-1]  # XXX Y3K.
     name_with_version = ami_ptrn_with_version.format(version=latest_version)
     filters.update({'name': name_with_version})
@@ -355,8 +455,9 @@ def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
     print 'Launching new instance in {zone} from {image}'.format(image=image,
                                                                  zone=zone)
 
+    key_pair = key_pair or config.get(region_name, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
-                            placement=zone,security_groups=['default',
+                            placement=zone, security_groups=['default',
                             security_group])
 
     print '{res.instances[0]} created in {zone}.'.format(res=reservation,
@@ -367,92 +468,76 @@ def create_instance(region_name='us-east-1', zone_name=None,key_pair=None
     return reservation.instances[0]
 
 
-def _prompt_to_select(choices, query='Select from', paging=False):
-    """Prompt to select an option from provided choices.
+@_contextmanager
+def _create_temporary_instance(zone):
+    inst = create_instance(zone.region.name, zone.name)
+    _wait_for(inst, ['state', ], 'running')
+    try:
+        yield inst
+    finally:
+        print 'Terminating the {0}...'.format(inst)
+        inst.terminate()
 
-    choices: list or dict. If dict, then choice will be made among keys.
-    paging: render long list with pagination.
 
-    Return solely possible value instantly without prompting."""
-    keys = list(choices)
-    while keys.count(None):
-        keys.pop(choices.index(None))    # Remove empty values.
-    assert len(keys), 'No choices provided'
+def _get_avail_dev(instance):
+    """Return next available device."""
+    chars = lowercase
+    for dev in instance.block_device_mapping:
+        chars = chars.replace(dev[-2], '')
+    return '/dev/sd{0}1'.format(chars[0])
 
-    if len(keys) == 1: return keys[0]
 
-    picked = None
-    while not picked in keys:
-        if paging:
-            pp = _PrettyPrinter()
-            _pager(query + '\n' + pp.pformat(choices))
-            text = 'Enter your choice or press Return to view options again'
+def _get_natty_dev(dev):
+    return dev.replace('sd', 'xvd')
+
+
+@_contextmanager
+def _attach_snapshot_in_zone(snap, zone):
+    conn = zone.region.connect()
+    volume = conn.create_volume(snapshot=snap.id, size=snap.volume_size,
+                                zone=zone)
+    try:
+        with _create_temporary_instance(zone) as inst:
+            dev = _get_avail_dev(inst)
+            attach = volume.attach(inst.id, dev)
+            volume.update()
+            _wait_for(volume, ['attach_data', 'status'], 'attached')
+            yield inst, dev
+    finally:
+        _wait_for(volume, ['status', ], 'available')
+        print 'Deleting the {vol}...'.format(vol=volume)
+        volume.delete()
+
+
+def _mount_device(inst, device):
+    """Issue commands via SSH to mount device. Return mountpoint on success.
+
+    inst
+        instance with the device;
+    device
+        device as it listed in keys of instance.block_device_mapping."""
+    key_filename = config.get(inst.region.name, 'key_filename')
+    env.update({
+        'host_string': inst.public_dns_name,
+        'key_filename': key_filename,
+        'load_known_hosts': False,
+        'user': username,
+    })
+    mountpoint = device.replace('/dev/', '/media/')
+    while True:
+        try:
+            sudo('mkdir {0}'.format(mountpoint))
+            break
+        except:
+            print 'sshd still launching, waiting for to try again...'
+            _sleep(5)
+    for dev in [device, _get_natty_dev(device)]:
+        try:
+            sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
+        except:
+            pass
         else:
-            text = '{query} {choices}'.format(query=query, choices=choices)
-        picked = prompt(text)
-    return picked
-
-
-def _get_all_instances(region=None, id_only=False):
-    if not region:
-        _warn('There is no guarantee of instance id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in _regions())
-    connections = (_connect_to_region(reg) for reg in reg_names)
-    for con in connections:
-        for res in con.get_all_instances():
-            for inst in res.instances:
-                yield inst.id if id_only else inst
-
-def _get_all_snapshots(region=None, id_only=False):
-    if not region:
-        _warn('There is no guarantee of snapshot id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in _regions())
-    connections = (_connect_to_region(reg) for reg in reg_names)
-    for con in connections:
-        for snap in con.get_all_snapshots(owner='self'):
-            yield snap.id if id_only else snap
-
-
-def _select_snapshot():
-    region_name = _prompt_to_select([reg.name for reg in _regions()],
-                                        'Select region from')
-    snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
-                     'otherwise)')
-    if snap_id:
-        if snap_id in _get_all_snapshots(region_name, id_only=True):
-            return region_name, snap_id
-        else:
-            print 'No snapshot with provided ID found'
-
-    instances_list = list(_get_all_instances(region_name))
-    instances = dict((inst.id, {'Name': inst.tags.get('Name'),
-                                'State': inst.state,
-                                'Launched': inst.launch_time,
-                                'Key pair': inst.key_name,
-                                'Type': inst.instance_type,
-                                'IP Address': inst.ip_address,
-                                'DNS Name': inst.public_dns_name}
-                     ) for inst in instances_list)
-    instance_id = _prompt_to_select(instances, 'Select instance ID from',
-                                    paging=True)
-
-    all_instances = _get_all_instances(region_name)
-    inst = [inst for inst in all_instances if inst.id == instance_id][0]
-    volumes = dict((dev.volume_id, {'Status': dev.status,
-                                    'Attached': dev.attach_time,
-                                    'Size': dev.size,
-                                    'Snapshot ID': dev.snapshot_id}
-                   ) for dev in inst.block_device_mapping.values())
-    volume_id = _prompt_to_select(volumes, 'Select volume ID from', paging=True)
-
-    all_snaps = _get_all_snapshots(region_name)
-    snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
-    snaps = dict((snap.id, {'Volume': snap.volume_id,
-                            'Date': snap.start_time,
-                            'Description': snap.description}
-                 ) for snap in snaps_list)
-    return region_name, _prompt_to_select(snaps, 'Select snapshot ID from',
-                                          paging=True)
+            return mountpoint
 
 
 def mount_snapshot(region=None, snap_id=None):
@@ -462,79 +547,27 @@ def mount_snapshot(region=None, snap_id=None):
     if not region or not snap_id:
         region, snap_id = _select_snapshot()
     conn = _connect_to_region(region)
-    snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
-    def _mount_snapshot_in_zone(snap_id, zone):
-        volume = inst = None
+    info = ('\nYou may now SSH into the {inst} server, using:'
+            '\n ssh -i {key} {user}@{inst.public_dns_name}')
+    for zone in conn.get_all_zones():
         try:
-            volume = conn.create_volume(
-                snapshot=snap.id, size=snap.volume_size, zone=zone)
-            print 'New {vol} created from {snap} in {zone}.'.format(
-                vol=volume, snap=snap, zone=zone)
-
-            try:
-                key_pair = config.get(region, 'key_pair')
-                inst = create_instance(zone.region.name, zone.name,key_pair)
-                _wait_for(inst, ['state',], 'running')
-                device = '/dev/sdk'
-                attach = volume.attach(inst.id, device)
-                volume.update()
-                _wait_for(volume, ['attach_data', 'status'], 'attached')
-                print 'Volume is attached to {inst} as {dev}.'.format(
-                    inst=inst, dev=device)
-
-                key_filename = config.get(zone.region.name, 'key_filename')
-                env.update({
-                    'host_string': inst.public_dns_name,
-                    'key_filename': key_filename,
-                    'load_known_hosts': False,
-                    'user': username,
-                })
-                while True:
-                    try:
-                        sudo('mkdir {mnt}'.format(mnt=mountpoint))
-                        break
-                    except:
-                        print 'sshd still launching, waiting to try again...'
-                        _sleep(5)
-                info = ('\nYou may now SSH into the {inst} server, using:'
-                        '\n ssh -i {key} {user}@{inst.public_dns_name}')
-                try:
-                    device = '/dev/xvdk' # For natty must be xvd* disk name
-                    sudo('mount {dev} {mnt}'.format(dev=device, mnt=mountpoint))
-                except:
+            with _attach_snapshot_in_zone(snap, zone) as (inst, dev):
+                mountpoint = _mount_device(inst, dev)
+                if mountpoint:
+                    info += ('\nand browse snapshot, mounted at {mountpoint}.')
+                else:
                     info += ('\nand mount {device}. NOTE: device name may be '
                              'modified by system.')
-                else:
-                    info += ('\nand browse mounted at {mountpoint} backup '
-                             'volume {device}.')
-                print info.format(inst=inst, device=device, key=key_filename,
+                key_filename = config.get(inst.region.name, 'key_filename')
+                print info.format(inst=inst, device=dev, key=key_filename,
                                   user=username, mountpoint=mountpoint)
 
                 info = ('\nEnter FINISHED if you are finished looking at the '
                         'backup and would like to cleanup: ')
                 while raw_input(info).strip() != 'FINISHED':
                     pass
-
-            # Cleanup processing: terminate temporary server.
-            finally:
-                if inst:
-                    print 'Terminating the {0}...'.format(inst)
-                    inst.terminate()
-                    print 'done.'
-
-        # Cleanup processing: delete detached backup volume.
-        finally:
-            if volume:
-                _wait_for(volume, ['status',], 'available')
-
-                print 'Deleting the backup {vol}...'.format(vol=volume)
-                delete = volume.delete()
-                print 'done.'
-
-    for zone in conn.get_all_zones():
-        try:
-            _mount_snapshot_in_zone(snap_id, zone)
         except _BotoServerError, err:
             print '{0} in {1}'.format(err, zone)
             continue
@@ -545,6 +578,7 @@ def mount_snapshot(region=None, snap_id=None):
 # FIXME Function up to 50 lines lenght easier to understand.
 # FIXME `zone_name` argument is not used.
 # FIXME `snap_id` is overwritten.
+
 def move_snapshot(region_name=None, reserve_region=None,
                  instance_id=None, instance=None,
                  zone_name=None, snap_id=None, res_snap_id=None):
@@ -566,8 +600,8 @@ def move_snapshot(region_name=None, reserve_region=None,
                                     'Key pair': inst.key_name,
                                     'Type': inst.instance_type,
                                     'IP Address': inst.ip_address,
-                                    'DNS Name': inst.public_dns_name}
-                        ) for inst in instances_list)
+                                    'DNS Name': inst.public_dns_name})
+                         for inst in instances_list)
         instance_id = _prompt_to_select(instances, 'Select instance ID from',
                                         paging=True)
     all_instances = _get_all_instances(region_name)
@@ -575,8 +609,8 @@ def move_snapshot(region_name=None, reserve_region=None,
     volumes = dict((dev.volume_id, {'Status': dev.status,
                                     'Attached': dev.attach_time,
                                     'Size': dev.size,
-                                    'Snapshot ID': dev.snapshot_id}
-                   ) for dev in inst.block_device_mapping.values())
+                                    'Snapshot ID': dev.snapshot_id})
+                   for dev in inst.block_device_mapping.values())
     volume_id = _prompt_to_select(volumes, 'Select volume ID from',
                                                           paging=True)
     if not reserve_region:
@@ -586,8 +620,8 @@ def move_snapshot(region_name=None, reserve_region=None,
     snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
     snaps = dict((snap.id, {'Volume': snap.volume_id,
                             'Date': snap.start_time,
-                            'Description': snap.description}
-                 ) for snap in snaps_list)
+                            'Description': snap.description})
+                 for snap in snaps_list)
     snap_id = _prompt_to_select(snaps, 'Select source snapshot ID from',
                                           paging=True)
 
@@ -602,7 +636,7 @@ def move_snapshot(region_name=None, reserve_region=None,
         key_pair_reserve = conn_reserve.create_key_pair('transfer_snapshot')
         reserve_secuity_group = conn_reserve.create_security_group(
                       'transfer_snapshot', 'Group for opening ssh')
-        reserve_secuity_group.authorize('tcp','22','22','0.0.0.0/0')
+        reserve_secuity_group.authorize('tcp', '22', '22', '0.0.0.0/0')
         if os.path.exists('./transfer_snapshot.pem'):
             os.system('rm ./transfer_snapshot.pem')
         key_pair_reserve.save('./')
@@ -610,7 +644,7 @@ def move_snapshot(region_name=None, reserve_region=None,
         _reserve_zone = conn_reserve.get_all_zones()[0]
         os.system('chmod 600 ./transfer_snapshot.pem')
 
-    snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
     filters = {'resource-type': 'snapshot', 'key': 'Source',
                    'tag-value': 'Created for {0} from {1}'.format(instance_id,
@@ -625,8 +659,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                                       paging=True)
     res_snap = None
     if res_snap_id:
-        res_snap = conn_reserve.get_all_snapshots(
-                                    snapshot_ids=[res_snap_id,])[0]
+        res_snap = conn_reserve.get_all_snapshots(snapshot_ids=res_snap_id)[0]
 
     # FIXME Code from the above inner function
     # mount_snapshot._mount_snapshot_in_zone should be reused below.
@@ -640,7 +673,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                 vol=volume, snap=snap, zone=zone)
             if res_snap:
                 volume_reserve = conn_reserve.create_volume(
-             snapshot=res_snap.id,size=res_snap.volume_size,
+             snapshot=res_snap.id, size=res_snap.volume_size,
                                                       zone=reserve_zone)
                 print 'New {vol} created from {snap} in {zone}.'.format(
                     vol=volume_reserve, snap=res_snap, zone=reserve_zone)
@@ -651,12 +684,12 @@ def move_snapshot(region_name=None, reserve_region=None,
                     vol=volume_reserve, zone=reserve_zone)
             try:
                 key_pair = config.get(region_name, 'key_pair')
-                inst = create_instance(zone.region.name, zone.name,key_pair)
-                _wait_for(inst, ['state',], 'running')
+                inst = create_instance(zone.region.name, zone.name, key_pair)
+                _wait_for(inst, ['state'], 'running')
                 inst_reserve = create_instance(_reserve_zone.region.name,
                               _reserve_zone.name,
-                              key_pair_reserve.name,'transfer_snapshot')
-                _wait_for(inst_reserve, ['state',], 'running')
+                              key_pair_reserve.name, 'transfer_snapshot')
+                _wait_for(inst_reserve, ['state'], 'running')
                 device = '/dev/sdk'
                 attach = volume.attach(inst.id, device)
                 volume.update()
@@ -690,13 +723,12 @@ def move_snapshot(region_name=None, reserve_region=None,
                     device = '/dev/xvdk'
                     sudo('mount {dev} {mnt}'.format(dev=device,
                                                 mnt=mountpoint))
-                    transfer_key = '/root/transfer_snapshot.pem'
                     os.system('scp -i {key_filename} '
                     '-o StrictHostKeyChecking=no '
                     './transfer_snapshot.pem '
                     '{user}@{host}:/home/ubuntu/transfer_snapshot.pem'.format(
-                        user=username,
-                         host=inst.public_dns_name,key_filename=key_filename))
+                    user=username, host=inst.public_dns_name,
+                    key_filename=key_filename))
                 except:     # FIXME Steps should be accomplished without
                             # user intervention.
                     info += ('\nand mount {device}. NOTE: device name may be '
@@ -769,8 +801,9 @@ def move_snapshot(region_name=None, reserve_region=None,
                     # FIXME Following steps shouldn't be iterated for
                     # each `snap.tags`.
                     reserved_snapshot.add_tag('Dest', 'Backup snapshots')
-                    reserved_snapshot.add_tag('Source', 'Created for {0} from {1}'.format(instance_id,
-                                                        zone.region.name))
+                    reserved_snapshot.add_tag('Source',
+                        'Created for {0} from {1}'.format(instance_id,
+                                                          zone.region.name))
                 print 'Waiting for the {snap} to be completed...'.format(
                                         snap=reserved_snapshot)
                 while reserved_snapshot.status != 'completed':
@@ -795,10 +828,10 @@ def move_snapshot(region_name=None, reserve_region=None,
         # Cleanup processing: delete detached backup volume.
         finally:
             if volume and volume_reserve:
-                _wait_for(volume, ['status',], 'available')
+                _wait_for(volume, ['status'], 'available')
                 print 'Deleting the backup {vol}...'.format(vol=volume)
                 delete = volume.delete()
-                _wait_for(volume_reserve, ['status',], 'available')
+                _wait_for(volume_reserve, ['status'], 'available')
                 reserve_secuity_group.delete()
                 print 'Deleting the backup {vol}...'.format(
                                                         vol=volume_reserve)
@@ -833,7 +866,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from
         config by default, may be configured per region."""
-    conn = _get_region_by_name(src_region_name).connection
+    conn = _get_region_by_name(src_region_name).connect()
     tag_name = tag_name or config.get(reg, 'tag_name')
     tag_value = tag_value or config.get(reg, 'tag_value')
     filters = {'tag-key': tag_name, 'tag-value': tag_value}
