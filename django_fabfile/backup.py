@@ -8,9 +8,10 @@ All other options will be taken from ./fabfile.cfg file.
 
 from datetime import timedelta as _timedelta, datetime
 from ConfigParser import ConfigParser as _ConfigParser
+from itertools import groupby as _groupby
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
-from re import compile as _compile
+from re import compile as _compile, match as _match
 from time import sleep as _sleep
 from warnings import warn as _warn
 
@@ -49,6 +50,14 @@ ami_ptrn_with_version = config.get('mount_backups',
 ami_ptrn_with_relase_date = config.get('mount_backups',
                                       'ami_ptrn_with_relase_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
+
+
+def _get_region_by_name(region_name):
+    """Allow to specify region name fuzzyly."""
+    matched = [reg for reg in _regions() if _match(region_name, reg.name)]
+    assert len(matched) > 0, 'No region matches {0}'.format(region_name)
+    assert len(matched) == 1, 'Several regions matches {0}'.format(region_name)
+    return matched[0]
 
 
 def _get_instance_by_id(region, instance_id):
@@ -510,7 +519,7 @@ def mount_snapshot(region=None, snap_id=None):
             # Cleanup processing: terminate temporary server.
             finally:
                 if inst:
-                    print 'Deleting the {0}...'.format(inst)
+                    print 'Terminating the {0}...'.format(inst)
                     inst.terminate()
                     print 'done.'
 
@@ -808,9 +817,27 @@ def move_snapshot(region_name=None, reserve_region=None,
         else:
             break
 
-# TODO Snapshots should be filtered by "Earmarking: production"
-# tag, which is copied from snapshotted instance. Latest snapshot for
-# the same `volume_id` should be rsynced - i.e. reserved snapshot should
-# be located by tag and `volume_id` automatically. Thus only two
-# arguments should be used by upper function - source and destination
-# region names.
+
+def rsync_snapshot(snapshot_id, dst_region_name):
+    pass
+
+
+def rsync_region(src_region_name, dst_region_name, tag_name=None,
+                 tag_value=None):
+    """Duplicates latest snapshots with given tag into dst_region.
+
+    src_region_name, dst_region_name
+        every latest snapshot from src_region will be `rsync`ed to
+        dst_region. Thus only latest snapshot will be stored in
+        dst_region;
+    tag_name, tag_value
+        snapshots will be filtered by tag. Tag will be fetched from
+        config by default, may be configured per region."""
+    conn = _get_region_by_name(src_region_name).connection
+    tag_name = tag_name or config.get(reg, 'tag_name')
+    tag_value = tag_value or config.get(reg, 'tag_value')
+    filters = {'tag-key': tag_name, 'tag-value': tag_value}
+    snaps = conn.get_all_snapshots(owner='self', filters=filters)
+    for vol, vol_snaps in _groupby(snaps, lambda x: x.volume_id):
+        latest_snap = sorted(vol_snaps, key=lambda x: x.start_time)[-1]
+        rsync_snapshot(latest_snap.id, dst_region_name)
