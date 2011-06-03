@@ -191,7 +191,8 @@ def _select_snapshot():
                                           paging=True)
 
 
-def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
+def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1',
+                    synchronously=False):
     """Return newly created snapshot of specified instance device.
 
     region
@@ -199,7 +200,9 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     instance, instance_id
         either `instance_id` or `instance` argument should be specified;
     dev
-        by default /dev/sda1 will be snapshotted."""
+        by default /dev/sda1 will be snapshotted;
+    synchronously
+        wait for completion."""
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     if instance_id:
@@ -212,28 +215,29 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1'):
     snapshot = conn.create_snapshot(vol_id, description)
     for tag in instance.tags:   # Clone intance tags to the snapshot.
         snapshot.add_tag(tag, instance.tags[tag])
-    print 'Waiting for the {snap} for {inst} to be completed...'.format(
-                                        snap=snapshot, inst=instance)
-    while snapshot.status != 'completed':
-        print 'still {snap.status}...'.format(snap=snapshot)
-        _sleep(5)
-        snapshot.update()
-    print 'done.'
+    if synchronously:
+        _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
 
 
-def backup_instance(region, instance_id=None, instance=None):
+def backup_instance(region, instance_id=None, instance=None,
+                    synchronously=False):
     """Return list of created snapshots for specified instance.
 
+    region
+        instance location;
     instance, instance_id
-        either `instance_id` or `instance` argument should be specified."""
+        either `instance_id` or `instance` argument should be specified;
+    synchronously
+        wait for completion."""
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     if instance_id:
         instance = _get_instance_by_id(region, instance_id)
     snapshots = []  # NOTE Fabric doesn't supports generators.
     for dev in instance.block_device_mapping:
-        snapshots.append(create_snapshot(region, instance=instance, dev=dev))
+        snapshots.append(create_snapshot(region, instance=instance, dev=dev,
+                                         synchronously=synchronously))
     return snapshots
 
 
@@ -723,12 +727,14 @@ def move_snapshot(region_name=None, reserve_region=None,
                     device = '/dev/xvdk'
                     sudo('mount {dev} {mnt}'.format(dev=device,
                                                 mnt=mountpoint))
+# Adding key...
                     os.system('scp -i {key_filename} '
                     '-o StrictHostKeyChecking=no '
                     './transfer_snapshot.pem '
                     '{user}@{host}:/home/ubuntu/transfer_snapshot.pem'.format(
                     user=username, host=inst.public_dns_name,
                     key_filename=key_filename))
+# done.
                 except:     # FIXME Steps should be accomplished without
                             # user intervention.
                     info += ('\nand mount {device}. NOTE: device name may be '
@@ -739,6 +745,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                 print info.format(inst=inst, device=device, key=key_filename,
                                   user=username, mountpoint=mountpoint)
 
+# Updating Fabric env...
                 key_filename_reserve = (os.getcwd()+'/transfer_snapshot.pem')
                 env.update({
                     'host_string': inst_reserve.public_dns_name,
@@ -746,6 +753,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                     'load_known_hosts': False,
                     'user': username,
                 })
+# done.
                 while True:
                     try:
                         sudo('mkdir {mnt}'.format(mnt=mountpoint))
@@ -757,6 +765,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                         'the {inst_reserve} server, using:'
                         '\n ssh -i {key} '
                         '{user}@{inst_reserve.public_dns_name}')
+# Granting access to destination...
                 try:
                     device = '/dev/xvdk'
                     if not res_snap:
@@ -765,6 +774,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                     sudo('cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/')
                 except:
                     info += ('\nand create fs on {device}.')
+# done.
                 try:
                     device = '/dev/xvdk'
                     sudo('mount {dev} {mnt}'.format(dev=device,
@@ -790,6 +800,8 @@ def move_snapshot(region_name=None, reserve_region=None,
                 '/media/snapshot root@{rhost}:/media'
                 ' '.format(rhost=inst_reserve.public_dns_name))
                 # SNAPSHOTIZATION!!!
+# FIXME create_snapshot() should be used instead.
+# TODO old snapshots should be removed.
                 description = 'Created for {0} from {1}'.format(instance_id,
                                                         zone.region.name)
                 if inst.tags.get('Name'):
