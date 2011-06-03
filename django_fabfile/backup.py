@@ -18,6 +18,7 @@ from warnings import warn as _warn
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.exception import BotoServerError as _BotoServerError
+from boto.ec2.blockdevicemapping import EBSBlockDeviceType
 import os, sys
 from fabric.api import env, prompt, sudo
 
@@ -841,3 +842,66 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     for vol, vol_snaps in _groupby(snaps, lambda x: x.volume_id):
         latest_snap = sorted(vol_snaps, key=lambda x: x.start_time)[-1]
         rsync_snapshot(latest_snap.id, dst_region_name)
+
+def create_ami(region=None, snap_id=None, force=None):
+    """
+    Creates AMI image from given snapshot.
+    Force option removes prompt request and creates
+    new instance from created ami image.
+    """
+    if not region or not snap_id:
+        region, snap_id = _select_snapshot()
+    conn = _connect_to_region(region)
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id,])[0]
+    volume = conn.get_all_volumes(volume_ids=[snap.volume_id,])[0]
+    instance_id = volume.attach_data.instance_id
+    if instance_id:
+        instance = _get_instance_by_id(region, instance_id)
+    # setup for building an EBS boot snapshot"
+    ebs = EBSBlockDeviceType()
+    ebs.snapshot_id = snap_id
+    block_map = instance.block_device_mapping
+    block_map[instance.block_device_mapping.current_name] = ebs
+
+    timeStamp = str(datetime.today())
+    comment = instance_id + ' ' + timeStamp
+    name = comment.replace(":",".")
+    name = name.replace(" ","_")
+    # use the same kernel & ramdisk from running server in the new AMI:
+    attribute = conn.get_instance_attribute(instance_id, 'kernel')
+    kernelID = attribute['kernel']
+    attribute = conn.get_instance_attribute(instance_id, 'ramdisk')
+    ramdiskID = attribute['ramdisk']
+
+    # create the new AMI:
+    result = conn.register_image(name=name,
+        description=timeStamp,
+        architecture=instance.architecture,
+        kernel_id=kernelID,
+        ramdisk_id=ramdiskID,
+        root_device_name=instance.root_device_name,
+        block_device_map=block_map)
+    print 'The new AMI ID = ', result
+
+    image = conn.get_all_images(image_ids=[result,])[0]
+    for tag in instance.tags:   # Clone intance tags to the AMI.
+        image.add_tag(tag, instance.tags[tag])
+
+    if force == None:
+        info = ('\nEnter YES if you want to create instance from '
+                        'previously created AMI image: ')
+    if force == 'YES' or raw_input(info).strip() == 'YES':
+        _security_groups = _prompt_to_select(
+        [sec.name for sec in conn.get_all_security_groups()],
+                                    'Select security group')
+        reservation = image.run(
+        key_name = instance.key_name,
+        security_groups = [_security_groups,],
+        instance_type = instance.instance_type,
+        )
+        new_instance = reservation.instances[0]
+        for tag in instance.tags:   # Clone intance tags.
+            new_instance.add_tag(tag, instance.tags[tag])
+
+
+
