@@ -7,9 +7,11 @@ All other options will be taken from ./fabfile.cfg file.
 '''
 
 from datetime import timedelta as _timedelta, datetime
+from dateutil.parser import parse as _parse
 from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
+from json import dumps as _dumps
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile, match as _match
@@ -103,6 +105,12 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         _sleep(min(sleep_for, max_sleep))
         getattr(obj, update_attr)()
     print 'done.'
+
+
+def _dumps_resources(res_dict={}, res_list=[]):
+    for res in res_list:
+        res_dict.update(dict([unicode(res).split(':')]))
+    return _dumps(res_dict)
 
 
 def _get_region_by_name(region_name):
@@ -203,14 +211,16 @@ def create_snapshot(region, instance_id=None, instance=None, dev='/dev/sda1',
         by default /dev/sda1 will be snapshotted;
     synchronously
         wait for completion."""
-    assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
-        'instance should be specified')
+    assert bool(instance_id) ^ bool(instance), (
+        'Either instance_id or instance should be specified')
     if instance_id:
         instance = _get_instance_by_id(region, instance_id)
     vol_id = instance.block_device_mapping[dev].volume_id
-    description = 'Created from {0} of {1}'.format(dev, instance.id)
-    if instance.tags.get('Name'):
-        description += ' named as {0}'.format(instance.tags['Name'])
+    description = _dumps_resources({
+        'Volume': vol_id,
+        'Region': region,
+        'Device': dev,
+        'Time': datetime.utcnow().isoformat()}, [instance])
     conn = _connect_to_region(region)
     snapshot = conn.create_snapshot(vol_id, description)
     for tag in instance.tags:   # Clone intance tags to the snapshot.
@@ -496,21 +506,28 @@ def _get_natty_dev(dev):
 
 
 @_contextmanager
-def _attach_snapshot_in_zone(snap, zone):
-    conn = zone.region.connect()
-    volume = conn.create_volume(snapshot=snap.id, size=snap.volume_size,
-                                zone=zone)
-    try:
-        with _create_temporary_instance(zone) as inst:
-            dev = _get_avail_dev(inst)
-            attach = volume.attach(inst.id, dev)
-            volume.update()
-            _wait_for(volume, ['attach_data', 'status'], 'attached')
-            yield inst, dev
-    finally:
-        _wait_for(volume, ['status', ], 'available')
-        print 'Deleting the {vol}...'.format(vol=volume)
-        volume.delete()
+def _attach_snapshot(snap):
+    conn = snap.region.connect()
+    for zone in conn.get_all_zones():
+        try:
+            volume = conn.create_volume(snapshot=snap.id,
+                                        size=snap.volume_size, zone=zone)
+            try:
+                with _create_temporary_instance(zone) as inst:
+                    dev_name = _get_avail_dev(inst)
+                    volume.attach(inst.id, dev_name)
+                    volume.update()
+                    _wait_for(volume, ['attach_data', 'status'], 'attached')
+                    yield inst, dev_name
+            finally:
+                _wait_for(volume, ['status', ], 'available')
+                print 'Deleting the {vol}...'.format(vol=volume)
+                volume.delete()
+        except _BotoServerError, err:
+            print '{0} in {1}'.format(err, zone)
+            continue
+        else:
+            break
 
 
 def _mount_device(inst, device):
@@ -555,28 +572,21 @@ def mount_snapshot(region=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    for zone in conn.get_all_zones():
-        try:
-            with _attach_snapshot_in_zone(snap, zone) as (inst, dev):
-                mountpoint = _mount_device(inst, dev)
-                if mountpoint:
-                    info += ('\nand browse snapshot, mounted at {mountpoint}.')
-                else:
-                    info += ('\nand mount {device}. NOTE: device name may be '
-                             'modified by system.')
-                key_filename = config.get(inst.region.name, 'key_filename')
-                print info.format(inst=inst, device=dev, key=key_filename,
-                                  user=username, mountpoint=mountpoint)
-
-                info = ('\nEnter FINISHED if you are finished looking at the '
-                        'backup and would like to cleanup: ')
-                while raw_input(info).strip() != 'FINISHED':
-                    pass
-        except _BotoServerError, err:
-            print '{0} in {1}'.format(err, zone)
-            continue
+    with _attach_snapshot(snap) as (inst, dev):
+        mountpoint = _mount_device(inst, dev)
+        if mountpoint:
+            info += ('\nand browse snapshot, mounted at {mountpoint}.')
         else:
-            break
+            info += ('\nand mount {device}. NOTE: device name may be '
+                     'modified by system.')
+        key_filename = config.get(inst.region.name, 'key_filename')
+        print info.format(inst=inst, device=dev, key=key_filename,
+                          user=username, mountpoint=mountpoint)
+
+        info = ('\nEnter FINISHED if you are finished looking at the '
+                'backup and would like to cleanup: ')
+        while raw_input(info).strip() != 'FINISHED':
+            pass
 
 
 # FIXME Function up to 50 lines lenght easier to understand.
@@ -631,6 +641,7 @@ def move_snapshot(region_name=None, reserve_region=None,
 
     conn = _connect_to_region(region_name)
     if reserve_region:  # FIXME Always True.
+# Creating keys and security group...
         conn_reserve = _connect_to_region(reserve_region)
         try:
             conn_reserve.delete_key_pair('transfer_snapshot')
@@ -644,9 +655,10 @@ def move_snapshot(region_name=None, reserve_region=None,
         if os.path.exists('./transfer_snapshot.pem'):
             os.system('rm ./transfer_snapshot.pem')
         key_pair_reserve.save('./')
+        os.system('chmod 600 ./transfer_snapshot.pem')
         reserve_zone = conn_reserve.get_all_zones()[0].name
         _reserve_zone = conn_reserve.get_all_zones()[0]
-        os.system('chmod 600 ./transfer_snapshot.pem')
+# done.
 
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
@@ -727,7 +739,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                     device = '/dev/xvdk'
                     sudo('mount {dev} {mnt}'.format(dev=device,
                                                 mnt=mountpoint))
-# Adding key...
+# Adding newly generated secret key to source instance...
                     os.system('scp -i {key_filename} '
                     '-o StrictHostKeyChecking=no '
                     './transfer_snapshot.pem '
@@ -745,7 +757,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                 print info.format(inst=inst, device=device, key=key_filename,
                                   user=username, mountpoint=mountpoint)
 
-# Updating Fabric env...
+# Updating Fabric env with destination settings...
                 key_filename_reserve = (os.getcwd()+'/transfer_snapshot.pem')
                 env.update({
                     'host_string': inst_reserve.public_dns_name,
@@ -765,11 +777,13 @@ def move_snapshot(region_name=None, reserve_region=None,
                         'the {inst_reserve} server, using:'
                         '\n ssh -i {key} '
                         '{user}@{inst_reserve.public_dns_name}')
-# Granting access to destination...
                 try:
                     device = '/dev/xvdk'
+# Creating initial snapshot at destination...
                     if not res_snap:
                         sudo('mkfs.ext3 {dev}'.format(dev=device))
+# Granting SSH access from source to destination...
+# FIXME use `ubuntu` username instead of `root`.
                     sudo('rm /root/.ssh/authorized_keys')
                     sudo('cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/')
                 except:
@@ -794,13 +808,13 @@ def move_snapshot(region_name=None, reserve_region=None,
                     'load_known_hosts': False,
                     'user': username,
                 })
-                # SYNCHRONISATION!!!
+# SYNCHRONISATION!!!
                 sudo('rsync -e "ssh -i /home/ubuntu/transfer_snapshot.pem '
                 '-o StrictHostKeyChecking=no" -ar --delete '
                 '/media/snapshot root@{rhost}:/media'
                 ' '.format(rhost=inst_reserve.public_dns_name))
                 # SNAPSHOTIZATION!!!
-# FIXME create_snapshot() should be used instead.
+# FIXME create_snapshot() should be used here.
 # TODO old snapshots should be removed.
                 description = 'Created for {0} from {1}'.format(instance_id,
                                                         zone.region.name)
@@ -808,6 +822,8 @@ def move_snapshot(region_name=None, reserve_region=None,
                     description += ' named as {0}'.format(inst.tags['Name'])
                 reserved_snapshot = volume_reserve.create_snapshot(
                                                                 description)
+# Cloning tags...
+# FIXME snapshot description should be cloned without modifications.
                 for tag in snap.tags:# Clone intance tags to the snapshot.
                     reserved_snapshot.add_tag(tag, snap.tags[tag])
                     # FIXME Following steps shouldn't be iterated for
@@ -816,6 +832,7 @@ def move_snapshot(region_name=None, reserve_region=None,
                     reserved_snapshot.add_tag('Source',
                         'Created for {0} from {1}'.format(instance_id,
                                                           zone.region.name))
+# done.
                 print 'Waiting for the {snap} to be completed...'.format(
                                         snap=reserved_snapshot)
                 while reserved_snapshot.status != 'completed':
@@ -863,8 +880,82 @@ def move_snapshot(region_name=None, reserve_region=None,
             break
 
 
-def rsync_snapshot(snapshot_id, dst_region_name):
-    pass
+def _rsync_mountpoints(src_snap, dst_inst, dst_dev):
+
+    """Run `rsync` against specified filesystems."""
+
+    dst_conn = dst['region'].connect()
+
+    def purge_temp_config():
+        dst_conn.delete_key_pair('transfer_snapshot')
+        if os.path.exists('./transfer_snapshot.pem'):
+            os.system('rm ./transfer_snapshot.pem')
+        try:
+            dst_conn.delete_security_group('transfer_snapshot')
+        except:
+            pass
+
+    purge_temp_config()
+
+    dst_key_pair = dst_conn.create_key_pair('transfer_snapshot')
+    dst_key_pair.save('./')
+    os.system('chmod 600 ./transfer_snapshot.pem')
+
+    dst_secuity_group = dst_conn.create_security_group(
+        'transfer_snapshot', 'Created temporarily for transferring snapshot')
+    dst_secuity_group.authorize('tcp', '22', '22', '0.0.0.0/0')
+    # Adding newly generated secret key to source instance.
+    os.system('scp -i {key_filename} -o StrictHostKeyChecking=no '
+              './transfer_snapshot.pem '
+              '{user}@{host}:/home/ubuntu/transfer_snapshot.pem'.format(
+              user=username, host=src['instance'].public_dns_name,
+              key_filename=key_filename))
+    # Updating Fabric env with destination settings.
+    env.update({
+        'host_string': dst['instance'].public_dns_name,
+        'key_filename': './transfer_snapshot.pem',
+        'load_known_hosts': False,
+        'user': username,
+    })
+    # Granting SSH access from source to destination.
+    # FIXME use `ubuntu` username instead of `root`.
+    sudo('rm /root/.ssh/authorized_keys')
+    sudo('cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/')
+
+    sudo('rsync -e "ssh -i /home/ubuntu/transfer_snapshot.pem '
+         '-o StrictHostKeyChecking=no" -ar --delete '
+         '/media/snapshot root@{rhost}:/media'
+         ' '.format(rhost=dst['instance'].public_dns_name))
+    dst_snap = volume_reserve.create_snapshot(src['snapshot'].description)
+    for tag in src['snapshot'].tags:
+        dst_snap.add_tag(tag, src['snapshot'].tags[tag])
+
+    purge_temp_config()
+
+
+def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
+
+    src_conn = _get_region_by_name(src_region_name).connect()
+    dst_conn = _get_region_by_name(dst_region_name).connect()
+    src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
+    snaps = dst_conn.get_all_snapshots(owner='self')
+
+    def is_vol_snap(snap, vol_id):
+        return _loads(snap.description)['Volume'] == vol_id
+
+    dst_snaps = [snp for snp in snaps if is_vol_snap(snp, src_snap.volume_id)]
+    if dst_snaps:   # Get latest.
+        get_time = lambda snap: _loads(snap.description)['Time']
+        dst_snap = sorted(dst_snaps, key=get_time)[-1]
+        with _attach_snapshot(dst_snap) as (dst_inst, dst_dev):
+            _rsync_mountpoints(src_snap, dst_inst, dst_dev)
+    else:   # FIXME create new volume.
+        dst_zone = dst_conn.get_all_zones()[0]
+        with _create_temporary_instance(dst_zone) as dst_inst:
+            dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zone)
+            dst_dev = _get_avail_dev(dst_inst)
+            dst_vol.attach(dst_inst, dst_dev)
+            _rsync_mountpoints(src_snap, dst_inst, dst_dev)
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
