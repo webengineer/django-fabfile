@@ -23,6 +23,6 @@ ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 architecture = x86_64
 mountpoint = /media/snapshot
 device = /dev/sdm
-ami_ptrn = ebs/ubuntu-images/ubuntu-*-server-*
+ami_ptrn = ebs/ubuntu-images/ubuntu-*-*.04-*-server-*
 ubuntu_aws_account = 099720109477
 
