@@ -7,9 +7,8 @@ All other options will be taken from ./fabfile.cfg file.
 '''
 
 from datetime import timedelta as _timedelta, datetime
-from dateutil.parser import parse as _parse
 from ConfigParser import ConfigParser as _ConfigParser
-from contextlib import contextmanager as _contextmanager, nested as _nested
+from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
 from os import chmod as _chmod, remove as _remove
@@ -27,8 +26,6 @@ from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.exception import (BotoServerError as _BotoServerError,
     EC2ResponseError as _EC2ResponseError)
-import os
-import sys
 from fabric.api import env, prompt, sudo
 from fabric.operations import put
 
@@ -730,8 +727,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
             pass
     snaps = dst_conn.get_all_snapshots(owner='self')
     dst_snaps = [snp for snp in snaps if is_vol_snap(snp, src_snap.volume_id)]
+    get_time = lambda snap: _loads(snap.description)['Time']
     if dst_snaps:   # Get latest snapshot.
-        get_time = lambda snap: _loads(snap.description)['Time']
         dst_snap = sorted(dst_snaps, key=get_time)[-1]
     else:
         dst_snap = None
