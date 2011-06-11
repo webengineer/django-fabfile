@@ -424,6 +424,12 @@ def _trim_snapshots(
 
 
 def trim_snapshots(region_name=None, dry_run=False):
+    """Delete old snapshots logarithmically back in time.
+
+    region_name
+        by default process all regions;
+    dry_run
+        boolean, only print info about old snapshots to be deleted."""
     region = _get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
@@ -558,10 +564,11 @@ def _get_vol_dev(vol, key_filename=None):
     while True:
         try:
             inst_devices = sudo('ls /dev').split()
-            break
         except Exception as err:
             print 'sshd unavailable, trying again in a moment...' + str(err)
             _sleep(5)
+        else:
+            break
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
             return '/dev/{0}'.format(dev)
@@ -588,10 +595,11 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     while True:
         try:
             sudo('mkdir {0}'.format(mountpoint))
-            break
         except Exception as err:
             print 'sshd unavailable, trying again in a moment...' + str(err)
             _sleep(5)
+        else:
+            break
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
