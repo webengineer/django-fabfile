@@ -103,17 +103,17 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         return attr
     sleep_for = 3
     if get_nested_attr(obj, attrs) != state:
-        if hasatt(obj, 'region', None):
+        if getattr(obj, 'region', None):
             info = 'Waiting for the {obj} in {obj.region} to be {state}...'
         else:
             info = 'Waiting for the {obj} to be {state}...'
         print info.format(obj=obj, state=state)
-    while get_nested_attr(obj, attrs) != state:
-        print 'still {0}...'.format(get_nested_attr(obj, attrs))
-        sleep_for += 5
-        _sleep(min(sleep_for, max_sleep))
-        getattr(obj, update_attr)()
-    print 'done.'
+        while get_nested_attr(obj, attrs) != state:
+            print 'still {0}...'.format(get_nested_attr(obj, attrs))
+            sleep_for += 5
+            _sleep(min(sleep_for, max_sleep))
+            getattr(obj, update_attr)()
+        print 'done.'
 
 
 def _dumps_resources(res_dict={}, res_list=[]):
@@ -131,7 +131,7 @@ def _get_region_by_name(region_name):
 
 
 def _get_inst_by_id(region, instance_id):
-    conn = _connect_to_region(region)
+    conn = _get_region_by_name(region).connect()
     res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
@@ -508,7 +508,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 def _create_temp_inst(zone, key_pair=None, security_groups=None):
     inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                            security_groups=security_groups)
-    inst.add_tag('Earmarking', 'staging')
+    inst.add_tag('Earmarking', 'temporary')
     _wait_for(inst, ['state', ], 'running')
     try:
         yield inst
@@ -783,6 +783,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     tag_value = tag_value or config.get(src_region.name, 'tag_value')
     filters = {'tag-key': tag_name, 'tag-value': tag_value}
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
-    for vol, vol_snaps in _groupby(snaps, lambda x: x.volume_id):
-        latest_snap = sorted(vol_snaps, key=lambda x: x.start_time)[-1]
+    snaps = sorted(snaps, key=lambda snap: snap.volume_id)
+    for vol, vol_snaps in _groupby(snaps, lambda snap: snap.volume_id):
+        latest_snap = sorted(vol_snaps, key=lambda snap: snap.start_time)[-1]
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
