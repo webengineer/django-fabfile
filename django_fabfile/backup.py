@@ -53,8 +53,8 @@ ubuntu_aws_account = config.get('mount_backups', 'ubuntu_aws_account')
 architecture = config.get('mount_backups', 'architecture')
 ami_ptrn = config.get('mount_backups', 'ami_ptrn')
 ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
-ami_ptrn_with_relase_date = config.get('mount_backups',
-                                       'ami_ptrn_with_relase_date')
+ami_ptrn_with_release_date = config.get('mount_backups',
+                                        'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 env.update({
@@ -472,7 +472,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     # Filtering by latest release date.
     dates = set([ptrn.search(img.name).group('released_at') for img in images])
     latest_date = sorted(set(dates))[-1]
-    name_with_version_and_release = ami_ptrn_with_relase_date.format(
+    name_with_version_and_release = ami_ptrn_with_release_date.format(
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
@@ -557,7 +557,7 @@ def _get_vol_dev(vol, key_filename=None):
     natty_dev = attached_dev.replace('sd', 'xvd')
     while True:
         try:
-            inst_devices = run('ls /dev').split()
+            inst_devices = sudo('ls /dev').split()
             break
         except Exception as err:
             print 'sshd unavailable, trying again in a moment...' + str(err)
@@ -601,6 +601,34 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     return mountpoint
 
 
+@_contextmanager
+def _config_temp_ssh(conn):
+    config_name = '{region}-temp-ssh-{now}'.format(
+        region=conn.region.name, now=datetime.now().isoformat())
+
+    if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
+        conn.delete_key_pair(config_name)
+    key_pair = conn.create_key_pair(config_name)
+    key_filename = key_pair.name + '.pem'
+    if _exists(key_filename):
+        _remove(key_filename)
+    key_pair.save('./')
+    _chmod(key_filename, 0600)
+
+    if config_name in [s_g.name for s_g in conn.get_all_security_groups()]:
+        conn.delete_security_group(config_name)
+    security_group = conn.create_security_group(
+        config_name, 'Created for temporary SSH access')
+    security_group.authorize('tcp', '22', '22', '0.0.0.0/0')
+
+    try:
+        yield _realpath(key_filename), security_group.name
+    finally:
+        security_group.delete()
+        key_pair.delete()
+        _remove(key_filename)
+
+
 def mount_snapshot(region_name=None, snap_id=None):
 
     """Mount snapshot to temporary created instance."""
@@ -631,33 +659,6 @@ def mount_snapshot(region_name=None, snap_id=None):
                 pass
 
 
-@_contextmanager
-def _config_temp_ssh(conn):
-    config_name = 'temp-ssh'
-
-    if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
-        conn.delete_key_pair(config_name)
-    key_pair = conn.create_key_pair(config_name)
-    key_filename = key_pair.name + '.pem'
-    if _exists(key_filename):
-        _remove(key_filename)
-    key_pair.save('./')
-    _chmod(key_filename, 0600)
-
-    if config_name in [s_g.name for s_g in conn.get_all_security_groups()]:
-        conn.delete_security_group(config_name)
-    security_group = conn.create_security_group(
-        config_name, 'Created for temporary SSH access')
-    security_group.authorize('tcp', '22', '22', '0.0.0.0/0')
-
-    try:
-        yield _realpath(key_filename), security_group.name
-    finally:
-        key_pair.delete()
-        _remove(key_filename)
-        security_group.delete()
-
-
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
     env.update({
         'host_string': src_inst.public_dns_name,
@@ -671,20 +672,21 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
                    user=username, src_mnt=src_mnt, dst_mnt=dst_mnt))
 
 
-def _rsync_snap_to_vol(src_snap, dst_vol, key_file, mkfs=False):
+def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
 
     """Run `rsync` to update dst_vol from src_snap."""
 
     src_conn = src_snap.region.connect()
-    with _config_temp_ssh(src_conn) as (key_file, sec_grp):
+    with _config_temp_ssh(src_conn) as (src_key_file, sec_grp):
         with _attach_snapshot(src_snap, security_groups=[sec_grp]) as src_vol:
             src_mnt = _mount_volume(src_vol)
-            dst_mnt = _mount_volume(dst_vol, key_file, mkfs=mkfs)
+            dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
             src_inst = _get_inst_by_id(src_vol.region.name,
                                        src_vol.attach_data.instance_id)
             dst_inst = _get_inst_by_id(dst_vol.region.name,
                                        dst_vol.attach_data.instance_id)
-            _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, key_file)
+            _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
+                               dst_key_file)
 
 
 def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
