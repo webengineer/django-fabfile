@@ -727,11 +727,13 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
             pass
     snaps = dst_conn.get_all_snapshots(owner='self')
     dst_snaps = [snp for snp in snaps if is_vol_snap(snp, src_snap.volume_id)]
-    get_time = lambda snap: _loads(snap.description)['Time']
-    if dst_snaps:   # Get latest snapshot.
-        dst_snap = sorted(dst_snaps, key=get_time)[-1]
-    else:
-        dst_snap = None
+
+    def get_time(snap):
+        try:
+            return _loads(snap.description)['Time']
+        except:
+            pass
+    dst_snap = sorted(dst_snaps, key=get_time)[-1] if dst_snaps else None
 
     if get_time(dst_snap) >= get_time(src_snap):
         return
