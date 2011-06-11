@@ -841,3 +841,20 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     for vol, vol_snaps in _groupby(snaps, lambda x: x.volume_id):
         latest_snap = sorted(vol_snaps, key=lambda x: x.start_time)[-1]
         rsync_snapshot(latest_snap.id, dst_region_name)
+
+def modify_kernel(instance_id, region, kernel):
+    """
+    Modify kernel for stopped instance
+    (needed for make pv-grub working)
+    Kernels list:
+        ap-southeast-1      x86_64  aki-11d5aa43
+        ap-southeast-1  i386    aki-13d5aa41
+        eu-west-1       x86_64  aki-4feec43b
+        eu-west-1       i386    aki-4deec439
+        us-east-1       x86_64  aki-427d952b
+        us-east-1       i386    aki-407d9529
+        us-west-1       x86_64  aki-9ba0f1de
+        us-west-1       i386    aki-99a0f1dc
+    """
+    instance = _get_instance_by_id(region, instance_id)
+    instance.modify_attribute('kernel', kernel)
