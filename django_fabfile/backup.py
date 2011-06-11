@@ -106,7 +106,11 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         return attr
     sleep_for = 3
     if get_nested_attr(obj, attrs) != state:
-        print 'Waiting for the {0} to be {1}...'.format(obj, state)
+        if hasatt(obj, 'region', None):
+            info = 'Waiting for the {obj} in {obj.region} to be {state}...'
+        else:
+            info = 'Waiting for the {obj} to be {state}...'
+        print info.format(obj=obj, state=state)
     while get_nested_attr(obj, attrs) != state:
         print 'still {0}...'.format(get_nested_attr(obj, attrs))
         sleep_for += 5
@@ -731,6 +735,9 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
         dst_snap = sorted(dst_snaps, key=get_time)[-1]
     else:
         dst_snap = None
+
+    if get_time(dst_snap) >= get_time(src_snap):
+        return
 
     def create_fresh_snap(dst_vol, src_snap):
         new_dst_snap = dst_vol.create_snapshot(src_snap.description)
