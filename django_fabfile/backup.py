@@ -617,7 +617,7 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
 @_contextmanager
 def _config_temp_ssh(conn):
     config_name = '{region}-temp-ssh-{now}'.format(
-        region=conn.region.name, now=datetime.now().isoformat())
+        region=conn.region.name, now=datetime.utcnow().isoformat())
 
     if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
         conn.delete_key_pair(config_name)
