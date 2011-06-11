@@ -842,10 +842,15 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         latest_snap = sorted(vol_snaps, key=lambda x: x.start_time)[-1]
         rsync_snapshot(latest_snap.id, dst_region_name)
 
-def modify_kernel(instance_id, region, kernel):
+def modify_kernel(region, instance_id):
     """
     Modify kernel for stopped instance
     (needed for make pv-grub working)
+    NOTICE: install grub-legacy-ec2 and upgrades before run this.
+    region
+        specify instance region;
+    instance_id
+        specify instance id for kernel change
     Kernels list:
         ap-southeast-1      x86_64  aki-11d5aa43
         ap-southeast-1  i386    aki-13d5aa41
@@ -857,4 +862,8 @@ def modify_kernel(instance_id, region, kernel):
         us-west-1       i386    aki-99a0f1dc
     """
     instance = _get_instance_by_id(region, instance_id)
+    kernel = config.get(region, 'kernel'+instance.architecture)
+    instance.stop()
+    _wait_for(instance, ['state',], 'stopped')
     instance.modify_attribute('kernel', kernel)
+    instance.start()

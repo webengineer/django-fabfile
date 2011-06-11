@@ -13,6 +13,20 @@ yearly_backups = 10
 [us-east-1]
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
+kernelx86_64 = aki-427d952b
+kerneli386 = aki-407d9529
+
+[us-west-1]
+kernelx86_64 = aki-9ba0f1de
+kerneli386 = aki-99a0f1dc
+
+[ap-southeast-1]
+kernelx86_64 = aki-11d5aa43
+kerneli386 = aki-13d5aa41
+
+[eu-west-1]
+kernelx86_64 = aki-4feec43b
+kerneli386 = aki-4deec439
 
 [mount_backups]
 username = ubuntu
