@@ -732,12 +732,9 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
                                dst_key_file)
 
 
-def _is_vol_snap(snap, vol_id):
-    """Return True if snapshot was created from the volume.
-
-    Return None if no Volume mentioned in description."""
+def _get_snap_vol(snap):
     try:
-        return _loads(snap.description)['Volume'] == vol_id
+        return _loads(snap.description)['Volume']
     except:
         pass
 
@@ -779,7 +776,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
                       name=src_snap.tags.get('Name'))
 
     snaps = dst_conn.get_all_snapshots(owner='self')
-    dst_snaps = [snp for snp in snaps if _is_vol_snap(snp, src_snap.volume_id)]
+    src_vol = _get_snap_vol(src_snap)
+    dst_snaps = [snp for snp in snaps if _get_snap_vol(snp) == src_vol]
 
     dst_snap = sorted(dst_snaps, key=_get_snap_time)[-1] if dst_snaps else None
 
@@ -825,7 +823,9 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     tag_value = tag_value or config.get(src_region.name, 'tag_value')
     filters = {'tag-key': tag_name, 'tag-value': tag_value}
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
-    snaps = sorted(snaps, key=lambda snap: snap.volume_id)
-    for vol, vol_snaps in _groupby(snaps, lambda snap: snap.volume_id):
-        latest_snap = sorted(vol_snaps, key=lambda snap: snap.start_time)[-1]
+    _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
+    snaps = [snp for snp in snaps if _is_described(snp)]
+    snaps = sorted(snaps, key=_get_snap_vol)
+    for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
+        latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
