@@ -539,7 +539,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                     yield volume
             finally:
                 _wait_for(volume, ['status', ], 'available')
-                print 'Deleting the {vol}...'.format(vol=volume)
+                print 'Deleting {vol} in {vol.region}...'.format(vol=volume)
                 volume.delete()
         except _BotoServerError, err:
             print '{0} in {1}'.format(err, zone)
@@ -777,9 +777,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
                 dst_vol.attach(dst_inst.id, dst_dev)
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file, mkfs=True)
                 _create_fresh_snap(dst_vol, src_snap)
-                dst_vol.detach()
-                _wait_for(dst_vol, ['status', ], 'available')
-                dst_vol.delete()
+            _wait_for(dst_vol, ['status', ], 'available')
+            dst_vol.delete()
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
