@@ -55,10 +55,7 @@ ami_ptrn_with_release_date = config.get('mount_backups',
                                         'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
-env.update({
-    'load_known_hosts': False,
-    'user': username,
-})
+env.update({'load_known_hosts': False, 'user': username})
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -459,9 +456,6 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 
     # TODO Allow only zone_name to be passed.
 
-    info = ('Please enter keypair name in the {0} region for person who will '
-            'access the instance').format(region_name)
-
     region = _get_region_by_name(region_name)
     conn = region.connect()
 
@@ -489,7 +483,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
     zone = zone_name or conn.get_all_zones()[-1].name
-    print 'Launching new instance in {zone} from {image}'.format(image=image,
+    print 'Launching new instance in {zone} using {image}'.format(image=image,
                                                                  zone=zone)
 
     key_pair = key_pair or config.get(region.name, 'key_pair')
@@ -513,7 +507,7 @@ def _create_temp_inst(zone, key_pair=None, security_groups=None):
     try:
         yield inst
     finally:
-        print 'Terminating the {0}...'.format(inst)
+        print 'Terminating the {0} in {0.region}...'.format(inst)
         inst.terminate()
 
 
@@ -558,13 +552,11 @@ def _get_vol_dev(vol, key_filename=None):
     if not vol.attach_data.instance_id:
         return
     inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
-    if not inst.public_dns_name:
+    if not inst.public_dns_name:    # The instance is down.
         return
     key_filename = key_filename or config.get(vol.region.name, 'key_filename')
-    env.update({
-        'host_string': inst.public_dns_name,
-        'key_filename': key_filename,
-    })
+    env.update({'host_string': inst.public_dns_name,
+                'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
     while True:
@@ -592,10 +584,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     dev_name = vol.attach_data.device
     key_filename = key_filename or config.get(vol.region.name, 'key_filename')
 
-    env.update({
-        'host_string': inst.public_dns_name,
-        'key_filename': key_filename,
-    })
+    env.update({'host_string': inst.public_dns_name,
+                'key_filename': key_filename})
     dev = _get_vol_dev(vol, key_filename)
     mountpoint = dev.replace('/dev/', '/media/')
     while True:
@@ -645,7 +635,11 @@ def _config_temp_ssh(conn):
 
 def mount_snapshot(region_name=None, snap_id=None):
 
-    """Mount snapshot to temporary created instance."""
+    """Mount snapshot to temporary created instance.
+
+    region_name
+        snapshot location
+    snap_id."""
 
     if not region_name or not snap_id:
         region_name, snap_id = _select_snapshot()
@@ -662,10 +656,12 @@ def mount_snapshot(region_name=None, snap_id=None):
                 info += ('\nand browse snapshot, mounted at {mountpoint}.')
             else:
                 info += ('\nand mount {device}. NOTE: device name may be '
-                         'modified by system.')
-            key_file = config.get(inst.region.name, 'key_filename')
-            print info.format(inst=inst, device=dev, key=key_file,
-                              user=username, mountpoint=mountpoint)
+                         'altered by system.')
+            key_file = config.get(region.name, 'key_filename')
+            inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
+            print info.format(
+                inst=inst, user=username, key=key_file,
+                device=vol.attach_data.device, mountpoint=mountpoint)
 
             info = ('\nEnter FINISHED if you are finished looking at the '
                     'backup and would like to cleanup: ')
@@ -674,16 +670,22 @@ def mount_snapshot(region_name=None, snap_id=None):
 
 
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
-    env.update({
-        'host_string': src_inst.public_dns_name,
-        'key_filename': config.get(src_inst.region.name, 'key_filename'),
-    })
+    env.update({'host_string': dst_inst.public_dns_name,
+                'key_filename': dst_key_file})
+    sudo('cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.bak')
+    sudo('cp .ssh/authorized_keys /root/.ssh/')
+    src_key_filename = config.get(src_inst.region.name, 'key_filename')
+    env.update({'host_string': src_inst.public_dns_name,
+                'key_filename': src_key_filename})
     put(dst_key_file, '.ssh/', mirror_local_mode=True)
     dst_key_filename = _split(dst_key_file)[1]
     cmd = ('rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no" '
-           '-ar --delete {src_mnt}/ {user}@{rhost}:{dst_mnt}')
+           '-a --delete {src_mnt}/ root@{rhost}:{dst_mnt}')
     sudo(cmd.format(rhost=dst_inst.public_dns_name, key_file=dst_key_filename,
-                   user=username, src_mnt=src_mnt, dst_mnt=dst_mnt))
+                    src_mnt=src_mnt, dst_mnt=dst_mnt))
+    env.update({'host_string': dst_inst.public_dns_name,
+                'key_filename': dst_key_file})
+    sudo('mv /root/.ssh/authorized_keys.bak /root/.ssh/authorized_keys')
 
 
 def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
@@ -703,6 +705,31 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
                                dst_key_file)
 
 
+def _is_vol_snap(snap, vol_id):
+    """Return True if snapshot was created from the volume.
+
+    Return None if no Volume mentioned in description."""
+    try:
+        return _loads(snap.description)['Volume'] == vol_id
+    except:
+        pass
+
+
+def _get_snap_time(snap):
+    try:
+        return _loads(snap.description)['Time']
+    except:
+        pass
+
+
+def _create_fresh_snap(dst_vol, src_snap):
+    """Create new snapshot with same description and tags."""
+    new_dst_snap = dst_vol.create_snapshot(src_snap.description)
+    for tag in src_snap.tags:
+        new_dst_snap.add_tag(tag, src_snap.tags[tag])
+    _wait_for(new_dst_snap, ['status', ], 'completed')
+
+
 def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
     """Duplicate the snapshot into dst_region.
@@ -717,32 +744,22 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
     dst_conn = _get_region_by_name(dst_region_name).connect()
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
 
-    def is_vol_snap(snap, vol_id):
-        """Return True if snapshot was created from the volume.
+    info = 'Transmitting {snap} {snap.description}'
+    if src_snap.tags.get('Name'):
+        info += ' of {name}'
+    info += ' from {src} to {dst}'
+    print info.format(snap=src_snap, src=src_conn.region, dst=dst_conn.region,
+                      name=src_snap.tags.get('Name'))
 
-        Return None if no Volume mentioned in description."""
-        try:
-            return _loads(snap.description)['Volume'] == vol_id
-        except:
-            pass
     snaps = dst_conn.get_all_snapshots(owner='self')
-    dst_snaps = [snp for snp in snaps if is_vol_snap(snp, src_snap.volume_id)]
+    dst_snaps = [snp for snp in snaps if _is_vol_snap(snp, src_snap.volume_id)]
 
-    def get_time(snap):
-        try:
-            return _loads(snap.description)['Time']
-        except:
-            pass
-    dst_snap = sorted(dst_snaps, key=get_time)[-1] if dst_snaps else None
+    dst_snap = sorted(dst_snaps, key=_get_snap_time)[-1] if dst_snaps else None
 
-    if get_time(dst_snap) >= get_time(src_snap):
+    if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
+        info = ' {src} is not newer than {dst} {dst.description} in {dst_reg}'
+        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_snap.region)
         return
-
-    def create_fresh_snap(dst_vol, src_snap):
-        new_dst_snap = dst_vol.create_snapshot(src_snap.description)
-        for tag in src_snap.tags:
-            new_dst_snap.add_tag(tag, src_snap.tags[tag])
-        _wait_for(new_dst_snap, ['status', ], 'completed')
 
     with _config_temp_ssh(dst_conn) as (key_file, sec_group):
         key_pair = _splitext(_split(key_file)[1])[0]
@@ -750,17 +767,16 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
         if dst_snap:
             with _attach_snapshot(dst_snap, key_pair, [sec_group]) as dst_vol:
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file)
-                create_fresh_snap(dst_vol, src_snap)
+                _create_fresh_snap(dst_vol, src_snap)
             dst_snap.delete()
         else:
-            dst_zone = dst_conn.get_all_zones()[-1]     # Just latest zone.
-            with _create_temp_inst(dst_zone, key_pair, [sec_group]) as dst_inst:
-                dst_vol = dst_conn.create_volume(src_snap.volume_size,
-                                                 dst_zone)
+            dst_zn = dst_conn.get_all_zones()[-1]     # Just latest zone.
+            with _create_temp_inst(dst_zn, key_pair, [sec_group]) as dst_inst:
+                dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zn)
                 dst_dev = _get_avail_dev(dst_inst)
                 dst_vol.attach(dst_inst.id, dst_dev)
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file, mkfs=True)
-                create_fresh_snap(dst_vol, src_snap)
+                _create_fresh_snap(dst_vol, src_snap)
                 dst_vol.detach()
                 _wait_for(dst_vol, ['status', ], 'available')
                 dst_vol.delete()
