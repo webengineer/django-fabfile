@@ -113,6 +113,46 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         print 'done.'
 
 
+class WaitForProper(object):
+
+    """Decorate consecutive exceptions eating.
+
+    >>> @WaitForProper(attempts=3, pause=5)
+    ... def test():
+    ...     1 / 0
+    ... 
+    >>> test()
+    ZeroDivisionError('integer division or modulo by zero',)
+     waiting next 5 sec (2 times left)
+    ZeroDivisionError('integer division or modulo by zero',)
+     waiting next 5 sec (1 times left)
+    ZeroDivisionError('integer division or modulo by zero',)
+    """
+
+    def __init__(self, attempts=10, pause=10):
+        self.attempts = attempts
+        self.pause = pause
+
+    def __call__(self, func):
+
+        def wrapper(*args, **kwargs):
+            while self.attempts > 0:
+                self.attempts -= 1
+                try:
+                    return func(*args, **kwargs)
+                except BaseException as err:
+                    print repr(err)
+                    if self.attempts > 0:
+                        msg = ' waiting next {0} sec ({1} times left)'
+                        print msg.format(self.pause, self.attempts)
+                        _sleep(self.pause)
+                else:
+                    break
+        return wrapper
+
+wait_for_sudo = WaitForProper()(sudo)
+
+
 def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
@@ -490,7 +530,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=zone, security_groups=security_groups)
 
-    print '{res.instances[0]} created in {zone}.'.format(res=reservation,
+    print '{res.instances[0]} created in {zone}'.format(res=reservation,
                                                          zone=zone)
 
     assert len(reservation.instances) == 1, 'More than 1 instances created'
@@ -509,6 +549,7 @@ def _create_temp_inst(zone, key_pair=None, security_groups=None):
     finally:
         print 'Terminating the {0} in {0.region}...'.format(inst)
         inst.terminate()
+        _wait_for(inst, ['state'], 'terminated')
 
 
 def _get_avail_dev(instance):
@@ -559,14 +600,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
-    while True:
-        try:
-            inst_devices = sudo('ls /dev').split()
-        except Exception as err:
-            print 'sshd unavailable, trying again in a moment...' + str(err)
-            _sleep(5)
-        else:
-            break
+    inst_devices = wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
             return '/dev/{0}'.format(dev)
@@ -588,14 +622,7 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
                 'key_filename': key_filename})
     dev = _get_vol_dev(vol, key_filename)
     mountpoint = dev.replace('/dev/', '/media/')
-    while True:
-        try:
-            sudo('mkdir {0}'.format(mountpoint))
-        except Exception as err:
-            print 'sshd unavailable, trying again in a moment...' + str(err)
-            _sleep(5)
-        else:
-            break
+    wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
