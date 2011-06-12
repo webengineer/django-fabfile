@@ -136,21 +136,41 @@ class WaitForProper(object):
     def __call__(self, func):
 
         def wrapper(*args, **kwargs):
-            while self.attempts > 0:
-                self.attempts -= 1
+            attempts = self.attempts
+            while attempts > 0:
+                attempts -= 1
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
                     print repr(err)
-                    if self.attempts > 0:
+                    if attempts > 0:
                         msg = ' waiting next {0} sec ({1} times left)'
-                        print msg.format(self.pause, self.attempts)
+                        print msg.format(self.pause, attempts)
                         _sleep(self.pause)
                 else:
                     break
         return wrapper
 
 wait_for_sudo = WaitForProper()(sudo)
+
+
+def _clone_tags(src_res, dst_res):
+    for tag in src_res.tags:
+        dst_res.add_tag(tag, src_res.tags[tag])
+
+
+def _get_snap_vol(snap):
+    try:
+        return _loads(snap.description)['Volume']
+    except:
+        pass
+
+
+def _get_snap_time(snap):
+    try:
+        return _loads(snap.description)['Time']
+    except:
+        pass
 
 
 def _dumps_resources(res_dict={}, res_list=[]):
@@ -270,8 +290,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Time': datetime.utcnow().isoformat()}, [instance])
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
-    for tag in instance.tags:   # Clone intance tags to the snapshot.
-        snapshot.add_tag(tag, instance.tags[tag])
+    _clone_tags(instance, snapshot)
     if synchronously:
         _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
@@ -567,8 +586,8 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
     conn = snap.region.connect()
     for zone in conn.get_all_zones():
         try:
-            volume = conn.create_volume(snapshot=snap.id,
-                                        size=snap.volume_size, zone=zone)
+            volume = conn.create_volume(snap.volume_size, zone, snap)
+            _clone_tags(snap, volume)
             try:
                 with _create_temp_inst(
                     zone, key_pair=key_pair, security_groups=security_groups) \
@@ -732,25 +751,10 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
                                dst_key_file)
 
 
-def _get_snap_vol(snap):
-    try:
-        return _loads(snap.description)['Volume']
-    except:
-        pass
-
-
-def _get_snap_time(snap):
-    try:
-        return _loads(snap.description)['Time']
-    except:
-        pass
-
-
 def _create_fresh_snap(dst_vol, src_snap):
     """Create new snapshot with same description and tags."""
     new_dst_snap = dst_vol.create_snapshot(src_snap.description)
-    for tag in src_snap.tags:
-        new_dst_snap.add_tag(tag, src_snap.tags[tag])
+    _clone_tags(src_snap, new_dst_snap)
     _wait_for(new_dst_snap, ['status', ], 'completed')
 
 
@@ -798,6 +802,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
             dst_zn = dst_conn.get_all_zones()[-1]     # Just latest zone.
             with _create_temp_inst(dst_zn, key_pair, [sec_group]) as dst_inst:
                 dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zn)
+                _clone_tags(src_snap, dst_vol)
                 dst_dev = _get_avail_dev(dst_inst)
                 dst_vol.attach(dst_inst.id, dst_dev)
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file, mkfs=True)
