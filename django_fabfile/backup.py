@@ -279,7 +279,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         instance = _get_inst_by_id(region.name, instance_id)
     vol_id = instance.block_device_mapping[dev].volume_id
     description = _dumps_resources({
-        #'Volume': vol_id, #Not needed - already exists in snap.volume_id
+        'Volume': vol_id,
         'Region': region.name,
         'Device': dev,
         'Kernel': instance.kernel,
