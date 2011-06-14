@@ -19,6 +19,6 @@ username = ubuntu
 ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
 ami_ptrn = ebs/ubuntu-images/ubuntu-*-server-*
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
-ami_ptrn_with_relase_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
+ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
 architecture = x86_64
 ubuntu_aws_account = 099720109477

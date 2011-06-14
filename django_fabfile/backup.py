@@ -912,3 +912,4 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
         new_instance = reservation.instances[0]
         _wait_for(new_instance, ['state', ], 'running')
         _clone_tags(snap, new_instance)
+        modify_instance_termination(region, new_instance)
