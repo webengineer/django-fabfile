@@ -99,6 +99,7 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
             attr = getattr(attr, attr_name)
         return attr
     sleep_for = 3
+    getattr(obj, update_attr)()
     if get_nested_attr(obj, attrs) != state:
         if getattr(obj, 'region', None):
             info = 'Waiting for the {obj} in {obj.region} to be {state}...'
@@ -151,7 +152,7 @@ class WaitForProper(object):
                     break
         return wrapper
 
-wait_for_sudo = WaitForProper()(sudo)
+wait_for_sudo = WaitForProper(attempts=20, pause=30)(sudo)
 
 
 def _clone_tags(src_res, dst_res):
@@ -550,7 +551,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
                             placement=zone, security_groups=security_groups)
 
     print '{res.instances[0]} created in {zone}'.format(res=reservation,
-                                                         zone=zone)
+                                                        zone=zone)
 
     assert len(reservation.instances) == 1, 'More than 1 instances created'
 
@@ -561,8 +562,8 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 def _create_temp_inst(zone, key_pair=None, security_groups=None):
     inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                            security_groups=security_groups)
-    inst.add_tag('Earmarking', 'temporary')
     _wait_for(inst, ['state', ], 'running')
+    inst.add_tag('Earmarking', 'temporary')
     try:
         yield inst
     finally:
