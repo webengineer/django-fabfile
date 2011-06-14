@@ -289,13 +289,10 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Volume': vol_id,
         'Region': region.name,
         'Device': dev,
-        'Kernel': instance.kernel,
-        'Ramdisk': instance.ramdisk,
         'Type': instance.instance_type,
         'Arch': instance.architecture,
         'Root_dev_name': instance.root_device_name,
-        'Key': instance.key_name,
-        #'Time': datetime.utcnow().isoformat() #Too long, max 255 chars at all
+        'Time': datetime.utcnow().isoformat() #Too long, max 255 chars at all
         }, [instance])
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
@@ -846,7 +843,8 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
 
-def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
+def create_ami(region=None, snap_id=None, force=None, encrypted_root=None,
+              key_pair=None):
     """
     Creates AMI image from given snapshot.
 
@@ -888,8 +886,8 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
     result = conn.register_image(name=name,
         description = timestamp,
         architecture = _loads(snap.description)['Arch'],
-        kernel_id = _loads(snap.description)['Kernel'],
-        ramdisk_id = _loads(snap.description)['Ramdisk'],
+        #kernel_id = _loads(snap.description)['Kernel'],
+        #ramdisk_id = _loads(snap.description)['Ramdisk'],
         root_device_name = _loads(snap.description)['Root_dev_name'],
         block_device_map = block_map)
     print 'The new AMI ID = ', result
@@ -905,11 +903,11 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
         [sec.name for sec in conn.get_all_security_groups()],
                                     'Select security group')
         reservation = image.run(
-        key_name = _loads(snap.description)['Key'],
+        key_name = key_pair or config.get(region, 'key_pair'),
         security_groups = [_security_groups, ],
         instance_type = _loads(snap.description)['Type'],
         )
         new_instance = reservation.instances[0]
         _wait_for(new_instance, ['state', ], 'running')
         _clone_tags(snap, new_instance)
-        modify_instance_termination(region, new_instance)
+        modify_instance_termination(region, new_instance.id)
