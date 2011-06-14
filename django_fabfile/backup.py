@@ -215,6 +215,13 @@ def _get_all_snapshots(region=None, id_only=False):
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
 
+def modify_instance_termination(region, instance_id=None):
+    inst = _get_inst_by_id(region, instance_id)
+    conn = _get_region_by_name(region).connect()
+    tag = inst.tags.get('Earmarking')
+    if tag=='production':
+        conn.modify_instance_attribute(instance_id,
+                      'disableApiTermination', True)
 
 def _select_snapshot():
     region_name = _prompt_to_select([reg.name for reg in _regions()],
