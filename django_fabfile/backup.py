@@ -284,10 +284,10 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Device': dev,
         'Kernel': instance.kernel,
         'Ramdisk': instance.ramdisk,
-	'Type': instance.instance_type,
-	'Arch': instance.architecture,
-	'Root_dev_name': instance.root_device_name,
-	'Key': instance.key_name,
+        'Type': instance.instance_type,
+        'Arch': instance.architecture,
+        'Root_dev_name': instance.root_device_name,
+        'Key': instance.key_name,
         #'Time': datetime.utcnow().isoformat() #Too long, max 255 chars at all
         }, [instance])
     conn = region.connect()
@@ -842,18 +842,19 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
 def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
     """
     Creates AMI image from given snapshot.
-    Force option removes prompt request and creates
-    new instance from created ami image.
+
+    Force option removes prompt request and creates new instance from
+    created ami image.
     region, snap_id
-	specify snapshot to be processed; snapshot description must be json
-	description of snapshotted instance.
+        specify snapshot to be processed; snapshot description must be
+        json description of snapshotted instance.
     force
-	Run instance from ami reation without confirmation
-	To enable set value to YES;
+        Run instance from ami reation without confirmation. To enable
+        set value to YES;
     enrypted_root
-	Needed to create images for instances with rootfs encryption
-	Forces to use /dev/sda instead /dev/sda1.
-	To enable set to any value other then None
+        Needed to create images for instances with rootfs encryption
+        Forces to use /dev/sda instead /dev/sda1. To enable set to any
+        value other then None
     """
     if not region or not snap_id:
         region, snap_id = _select_snapshot()
@@ -867,9 +868,9 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
     ebs.snapshot_id = snap_id
     block_map = BlockDeviceMapping()
     if encrypted_root:
-	block_map['/dev/sda'] = ebs
+        block_map['/dev/sda'] = ebs
     else:
-	block_map['/dev/sda1'] = ebs
+        block_map['/dev/sda1'] = ebs
 
     timestamp = str(datetime.utcnow().isoformat())
     comment = instance_id + ' ' + timestamp
@@ -887,8 +888,7 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
     print 'The new AMI ID = ', result
 
     image = conn.get_all_images(image_ids=[result, ])[0]
-    for tag in snap.tags:   # Clone snap tags to the AMI.
-        image.add_tag(tag, snap.tags[tag])
+    _clone_tags(snap, image)
 
     if force == None:
         info = ('\nEnter YES if you want to create instance from '
@@ -904,5 +904,4 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None):
         )
         new_instance = reservation.instances[0]
         _wait_for(new_instance, ['state', ], 'running')
-        for tag in snap.tags:   # Clone snap tags.
-            new_instance.add_tag(tag, snap.tags[tag])
+        _clone_tags(snap, new_instance)
