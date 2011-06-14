@@ -48,7 +48,7 @@ ami_ptrn = config.get('mount_backups', 'ami_ptrn')
 ami_ptrn_with_version = config.get('mount_backups',
                                           'ami_ptrn_with_version')
 ami_ptrn_with_relase_date = config.get('mount_backups',
-                                      'ami_ptrn_with_relase_date')
+                                      'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 
