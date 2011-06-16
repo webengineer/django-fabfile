@@ -1,6 +1,7 @@
 [DEFAULT]
 tag_name = Earmarking
 tag_value = production
+debug = False
 
 [purge_backups]
 hourly_backups = 24

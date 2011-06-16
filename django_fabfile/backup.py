@@ -39,6 +39,7 @@ for reg in _regions():
         with open(config_file, 'w') as f_p:
             config.write(f_p)
 
+debug = config.getboolean('DEFAULT', 'debug')
 hourly_backups = config.getint('purge_backups', 'hourly_backups')
 daily_backups = config.getint('purge_backups', 'daily_backups')
 weekly_backups = config.getint('purge_backups', 'weekly_backups')
@@ -56,6 +57,11 @@ ami_ptrn_with_release_date = config.get('mount_backups',
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 env.update({'load_known_hosts': False, 'user': username})
+
+
+def _print_dbg(text):
+    if debug:
+        print 'DEBUG: {0}'.format(text)
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -100,8 +106,12 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         return attr
     sleep_for = 3
     getattr(obj, update_attr)()
-    if get_nested_attr(obj, attrs) != state:
-        if getattr(obj, 'region', None):
+    _print_dbg('Called {0} update'.format(obj))
+    obj_state = get_nested_attr(obj, attrs)
+    obj_region = getattr(obj, 'region', None)
+    _print_dbg('State fetched from {0} in {1}'.format(obj, obj_region))
+    if obj_state != state:
+        if obj_region:
             info = 'Waiting for the {obj} in {obj.region} to be {state}...'
         else:
             info = 'Waiting for the {obj} to be {state}...'
@@ -549,20 +559,18 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     key_pair = key_pair or config.get(region.name, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=zone, security_groups=security_groups)
-
-    print '{res.instances[0]} created in {zone}'.format(res=reservation,
-                                                        zone=zone)
-
     assert len(reservation.instances) == 1, 'More than 1 instances created'
+    inst = reservation.instances[0]
+    _wait_for(inst, ['state', ], 'running')
+    print '{inst} created in {zone}'.format(inst=inst, zone=zone)
 
-    return reservation.instances[0]
+    return inst
 
 
 @_contextmanager
 def _create_temp_inst(zone, key_pair=None, security_groups=None):
     inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                            security_groups=security_groups)
-    _wait_for(inst, ['state', ], 'running')
     inst.add_tag('Earmarking', 'temporary')
     try:
         yield inst
@@ -589,6 +597,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
         try:
             volume = conn.create_volume(snap.volume_size, zone, snap)
             _clone_tags(snap, volume)
+            _print_dbg('Tags cloned from {0} to {1}'.format(snap, volume))
             try:
                 with _create_temp_inst(
                     zone, key_pair=key_pair, security_groups=security_groups) \
@@ -675,7 +684,11 @@ def _config_temp_ssh(conn):
     try:
         yield _realpath(key_filename), security_group.name
     finally:
-        security_group.delete()
+        if debug and security_group.instances():
+            msg = '{0} used in {1}, remove manually'
+            _print_dbg(msg.format(security_group, security_group.instances()))
+        else:
+            security_group.delete()
         key_pair.delete()
         _remove(key_filename)
 
