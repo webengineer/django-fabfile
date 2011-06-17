@@ -220,13 +220,24 @@ def _get_all_snapshots(region=None, id_only=False):
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
 
-def modify_instance_termination(region, instance_id=None):
-    inst = _get_inst_by_id(region, instance_id)
+
+def modify_instance_termination(region, instance_id):
+    """Mark production instnaces as uneligible for termination.
+
+    region
+        name of region where instance is located;
+    instance_id
+        instance to be updated;
+
+    You must change value of preconfigured tag_name and run this command
+    before terminating production instance via API."""
     conn = _get_region_by_name(region).connect()
-    tag = inst.tags.get('Earmarking')
-    if tag=='production':
-        conn.modify_instance_attribute(instance_id,
-                      'disableApiTermination', True)
+    inst = _get_inst_by_id(conn.region.name, instance_id)
+    prod_tag = config.get(conn.region.name, 'tag_name')
+    prod_val = config.get(conn.region.name, 'tag_value')
+    inst_tag_val = inst.tags.get(prod_tag)
+    inst.modify_attribute('disableApiTermination', inst_tag_val == prod_val)
+
 
 def _select_snapshot():
     region_name = _prompt_to_select([reg.name for reg in _regions()],
