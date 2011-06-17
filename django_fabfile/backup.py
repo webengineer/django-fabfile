@@ -125,11 +125,11 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         print 'done.'
 
 
-class WaitForProper(object):
+class _WaitForProper(object):
 
     """Decorate consecutive exceptions eating.
 
-    >>> @WaitForProper(attempts=3, pause=5)
+    >>> @_WaitForProper(attempts=3, pause=5)
     ... def test():
     ...     1 / 0
     ... 
@@ -163,7 +163,7 @@ class WaitForProper(object):
                     break
         return wrapper
 
-wait_for_sudo = WaitForProper(attempts=20, pause=30)(sudo)
+_wait_for_sudo = _WaitForProper(attempts=20, pause=30)(sudo)
 
 
 def _clone_tags(src_res, dst_res):
@@ -632,7 +632,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
-    inst_devices = wait_for_sudo('ls /dev').split()
+    inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
             return '/dev/{0}'.format(dev)
@@ -654,7 +654,7 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
                 'key_filename': key_filename})
     dev = _get_vol_dev(vol, key_filename)
     mountpoint = dev.replace('/dev/', '/media/')
-    wait_for_sudo('mkdir {0}'.format(mountpoint))
+    _wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
