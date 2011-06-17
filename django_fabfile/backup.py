@@ -55,6 +55,7 @@ ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
 ami_ptrn_with_release_date = config.get('mount_backups',
                                         'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
+ssh_grp = config.get('DEFAULT', 'ssh_security_group')
 
 env.update({'load_known_hosts': False, 'user': username})
 
@@ -603,7 +604,9 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                     zone, key_pair=key_pair, security_groups=security_groups) \
                     as inst:
                     dev_name = _get_avail_dev(inst)
+                    _print_dbg('Got avail {0} from {1}'.format(dev_name, inst))
                     volume.attach(inst.id, dev_name)
+                    _print_dbg('Attached {0} to {1}'.format(volume, inst))
                     volume.update()
                     _wait_for(volume, ['attach_data', 'status'], 'attached')
                     yield volume
@@ -675,20 +678,9 @@ def _config_temp_ssh(conn):
     key_pair.save('./')
     _chmod(key_filename, 0600)
 
-    if config_name in [s_g.name for s_g in conn.get_all_security_groups()]:
-        conn.delete_security_group(config_name)
-    security_group = conn.create_security_group(
-        config_name, 'Created for temporary SSH access')
-    security_group.authorize('tcp', '22', '22', '0.0.0.0/0')
-
     try:
-        yield _realpath(key_filename), security_group.name
+        yield _realpath(key_filename)
     finally:
-        if debug and security_group.instances():
-            msg = '{0} used in {1}, remove manually'
-            _print_dbg(msg.format(security_group, security_group.instances()))
-        else:
-            security_group.delete()
         key_pair.delete()
         _remove(key_filename)
 
@@ -709,8 +701,8 @@ def mount_snapshot(region_name=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _config_temp_ssh(conn) as (key_file, sec_group):
-        with _attach_snapshot(snap, security_groups=[sec_group]) as vol:
+    with _config_temp_ssh(conn) as key_file:
+        with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
             mountpoint = _mount_volume(vol)
             if mountpoint:
                 info += ('\nand browse snapshot, mounted at {mountpoint}.')
@@ -753,8 +745,8 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
     """Run `rsync` to update dst_vol from src_snap."""
 
     src_conn = src_snap.region.connect()
-    with _config_temp_ssh(src_conn) as (src_key_file, sec_grp):
-        with _attach_snapshot(src_snap, security_groups=[sec_grp]) as src_vol:
+    with _config_temp_ssh(src_conn) as src_key_file:
+        with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
             src_mnt = _mount_volume(src_vol)
             dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
             src_inst = _get_inst_by_id(src_vol.region.name,
@@ -804,17 +796,17 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
         print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_snap.region)
         return
 
-    with _config_temp_ssh(dst_conn) as (key_file, sec_group):
+    with _config_temp_ssh(dst_conn) as key_file:
         key_pair = _splitext(_split(key_file)[1])[0]
 
         if dst_snap:
-            with _attach_snapshot(dst_snap, key_pair, [sec_group]) as dst_vol:
+            with _attach_snapshot(dst_snap, key_pair, [ssh_grp]) as dst_vol:
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file)
                 _create_fresh_snap(dst_vol, src_snap)
             dst_snap.delete()
         else:
             dst_zn = dst_conn.get_all_zones()[-1]     # Just latest zone.
-            with _create_temp_inst(dst_zn, key_pair, [sec_group]) as dst_inst:
+            with _create_temp_inst(dst_zn, key_pair, [ssh_grp]) as dst_inst:
                 dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zn)
                 _clone_tags(src_snap, dst_vol)
                 dst_dev = _get_avail_dev(dst_inst)
