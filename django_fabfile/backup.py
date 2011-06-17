@@ -20,6 +20,7 @@ from pydoc import pager as _pager
 from re import compile as _compile, match as _match
 from string import lowercase
 from time import sleep as _sleep
+from traceback import format_exc as _format_exc
 from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
@@ -106,6 +107,14 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
             attr = getattr(attr, attr_name)
         return attr
     sleep_for = 3
+    _print_dbg('Calling {0} updates'.format(obj))
+    for i in range(10):     # Resource may be reported as "not exists"
+        try:                # right after creation.
+            getattr(obj, update_attr)()
+        except:
+            pass
+        else:
+            break
     getattr(obj, update_attr)()
     _print_dbg('Called {0} update'.format(obj))
     obj_state = get_nested_attr(obj, attrs)
@@ -154,7 +163,7 @@ class _WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    print repr(err)
+                    print _format_exc() if debug else repr(err)
                     if attempts > 0:
                         msg = ' waiting next {0} sec ({1} times left)'
                         print msg.format(self.pause, attempts)
@@ -632,8 +641,8 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                 _wait_for(volume, ['status', ], 'available')
                 print 'Deleting {vol} in {vol.region}...'.format(vol=volume)
                 volume.delete()
-        except _BotoServerError, err:
-            print '{0} in {1}'.format(err, zone)
+        except _BotoServerError as err:
+            print _format_exc() if debug else '{0} in {1}'.format(err, zone)
             continue
         else:
             break
