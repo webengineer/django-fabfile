@@ -57,6 +57,8 @@ ami_ptrn_with_release_date = config.get('mount_backups',
                                         'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 ssh_grp = config.get('DEFAULT', 'ssh_security_group')
+ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
+ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
 env.update({'load_known_hosts': False, 'user': username})
 
@@ -172,7 +174,8 @@ class _WaitForProper(object):
                     break
         return wrapper
 
-_wait_for_sudo = _WaitForProper(attempts=20, pause=30)(sudo)
+_wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
+                                pause=ssh_timeout_interval)(sudo)
 
 
 def _clone_tags(src_res, dst_res):

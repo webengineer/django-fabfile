@@ -2,6 +2,9 @@
 tag_name = Earmarking
 tag_value = production
 debug = False
+ssh_security_group = ssh-access
+ssh_timeout_attempts = 30
+ssh_timeout_interval = 30
 
 [purge_backups]
 hourly_backups = 24
