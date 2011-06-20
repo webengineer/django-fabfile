@@ -25,13 +25,12 @@ from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
+from boto.ec2.blockdevicemapping import (
+    BlockDeviceMapping as _BlockDeviceMapping,
+    EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
-    EC2ResponseError as _EC2ResponseError)
-from boto.ec2.blockdevicemapping import EBSBlockDeviceType, BlockDeviceMapping
-import os
-import sys
-from fabric.api import env, prompt, sudo
-from fabric.operations import put
+                            EC2ResponseError as _EC2ResponseError)
+from fabric.api import env, prompt, put, sudo
 
 
 config_file = 'fabfile.cfg'
@@ -57,6 +56,9 @@ ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
 ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
 env.update({'load_known_hosts': False, 'user': username})
+
+
+_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _print_dbg(text):
@@ -179,18 +181,19 @@ def _clone_tags(src_res, dst_res):
         dst_res.add_tag(tag, src_res.tags[tag])
 
 
-def _get_snap_vol(snap):
+def _get_descr_attr(snap, attr):
     try:
-        return _loads(snap.description)['Volume']
+        return _loads(snap.description)[attr]
     except:
         pass
+
+
+def _get_snap_vol(snap):
+    return _get_descr_attr(snap, 'Volume')
 
 
 def _get_snap_time(snap):
-    try:
-        return _loads(snap.description)['Time']
-    except:
-        pass
+    return _get_descr_attr(snap, 'Time')
 
 
 def _dumps_resources(res_dict={}, res_list=[]):
@@ -328,7 +331,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Type': instance.instance_type,
         'Arch': instance.architecture,
         'Root_dev_name': instance.root_device_name,
-        'Time': datetime.utcnow().isoformat(),
+        'Time': _now(),
         }, [instance])
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
@@ -698,8 +701,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
 
 @_contextmanager
 def _config_temp_ssh(conn):
-    config_name = '{region}-temp-ssh-{now}'.format(
-        region=conn.region.name, now=datetime.utcnow().isoformat())
+    config_name = '{region}-temp-ssh-{now}'.format(region=conn.region.name,
+                                                   now=_now())
 
     if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
         conn.delete_key_pair(config_name)
@@ -807,7 +810,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
     snapshot_id
         snapshot to duplicate."""
     src_conn = _get_region_by_name(src_region_name).connect()
-    dst_conn = _get_region_by_name(dst_region_name).connect()
+    dst_reg = _get_region_by_name(dst_region_name)
+    dst_conn = dst_reg.connect()
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
 
     info = 'Transmitting {snap} {snap.description}'
@@ -825,7 +829,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
     if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
         info = ' {src} is not newer than {dst} {dst.description} in {dst_reg}'
-        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_snap.region)
+        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_reg)
         return
 
     with _config_temp_ssh(dst_conn) as key_file:
@@ -874,8 +878,8 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
 
 
-def create_ami(region=None, snap_id=None, force=None, encrypted_root=None,
-               key_pair=None):
+def create_ami(region=None, snap_id=None, force=None, key_pair=None,
+               root_dev='/dev/sda1', inst_arch='x86_64', inst_type='t1.micro'):
     """
     Creates AMI image from given snapshot.
 
@@ -886,58 +890,44 @@ def create_ami(region=None, snap_id=None, force=None, encrypted_root=None,
         json description of snapshotted instance.
     force
         Run instance from ami reation without confirmation. To enable
-        set value to YES;
-    enrypted_root
-        Needed to create images for instances with rootfs encryption
-        Forces to use /dev/sda instead /dev/sda1. To enable set to any
-        value other then None
+        set value to "RUN";
     """
     if not region or not snap_id:
         region, snap_id = _select_snapshot()
-    conn = _connect_to_region(region)
+    conn = _get_region_by_name(region).connect()
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
-    instance_id = _loads(snap.description)['Instance']
-    if instance_id:
-        instance = _get_inst_by_id(region, instance_id)
     # setup for building an EBS boot snapshot"
-    ebs = EBSBlockDeviceType()
+    ebs = _EBSBlockDeviceType()
     ebs.snapshot_id = snap_id
-    block_map = BlockDeviceMapping()
-    if encrypted_root:
-        block_map['/dev/sda'] = ebs
-    else:
-        block_map['/dev/sda1'] = ebs
+    block_map = _BlockDeviceMapping()
+    block_map[root_dev] = ebs
 
-    timestamp = str(datetime.utcnow().isoformat())
-    comment = instance_id + ' ' + timestamp
-    name = comment.replace(":", ".")
-    name = name.replace(" ", "_")
+    name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
+    name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
-    result = conn.register_image(name=name,
-        description = timestamp,
-        architecture = _loads(snap.description)['Arch'],
-        #kernel_id = _loads(snap.description)['Kernel'],
-        #ramdisk_id = _loads(snap.description)['Ramdisk'],
-        root_device_name = _loads(snap.description)['Root_dev_name'],
+    result = conn.register_image(
+        name=name,
+        description = snap.description,
+        architecture = _get_descr_attr(snap, 'Arch') or inst_arch,
+        root_device_name = _get_descr_attr(snap, 'Root_dev_name') or root_dev,
         block_device_map = block_map)
-    print 'The new AMI ID = ', result
-
     image = conn.get_all_images(image_ids=[result, ])[0]
     _clone_tags(snap, image)
 
-    if force == None:
-        info = ('\nEnter YES if you want to create instance from '
-                        'previously created AMI image: ')
-    if force == 'YES' or raw_input(info).strip() == 'YES':
+    print 'The new AMI ID = ', result
+
+    info = ('\nEnter RUN if you want to launch instance using '
+            'just created {0}: '.format(image))
+    if force == 'RUN' or raw_input(info).strip() == 'RUN':
         _security_groups = _prompt_to_select(
-        [sec.name for sec in conn.get_all_security_groups()],
-                                    'Select security group')
+            [sec.name for sec in conn.get_all_security_groups()],
+            'Select security group')
         reservation = image.run(
-        key_name = key_pair or config.get(region, 'key_pair'),
-        security_groups = [_security_groups, ],
-        instance_type = _loads(snap.description)['Type'],
-        )
+            key_name = key_pair or config.get(_get_region_by_name(region).name,
+                                              'key_pair'),
+            security_groups = [_security_groups, ],
+            instance_type = _get_descr_attr(snap, 'Type') or inst_type)
         new_instance = reservation.instances[0]
         _wait_for(new_instance, ['state', ], 'running')
         _clone_tags(snap, new_instance)
