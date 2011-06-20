@@ -1,6 +1,10 @@
 [DEFAULT]
 tag_name = Earmarking
 tag_value = production
+debug = False
+ssh_security_group = ssh-access
+ssh_timeout_attempts = 30
+ssh_timeout_interval = 30
 
 [purge_backups]
 hourly_backups = 24
@@ -17,7 +21,7 @@ key_filename = /home/username/.ssh/regional_username_rsa
 [mount_backups]
 username = ubuntu
 ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
-ami_ptrn = ebs/ubuntu-images/ubuntu-*-server-*
+ami_ptrn = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
 architecture = x86_64

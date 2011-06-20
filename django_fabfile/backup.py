@@ -20,6 +20,7 @@ from pydoc import pager as _pager
 from re import compile as _compile, match as _match
 from string import lowercase
 from time import sleep as _sleep
+from traceback import format_exc as _format_exc
 from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
@@ -27,7 +28,8 @@ from boto.ec2 import (connect_to_region as _connect_to_region,
 from boto.exception import (BotoServerError as _BotoServerError,
     EC2ResponseError as _EC2ResponseError)
 from boto.ec2.blockdevicemapping import EBSBlockDeviceType, BlockDeviceMapping
-import os, sys
+import os
+import sys
 from fabric.api import env, prompt, sudo
 from fabric.operations import put
 
@@ -41,6 +43,7 @@ for reg in _regions():
         with open(config_file, 'w') as f_p:
             config.write(f_p)
 
+debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('mount_backups', 'username')
 ubuntu_aws_account = config.get('mount_backups', 'ubuntu_aws_account')
 architecture = config.get('mount_backups', 'architecture')
@@ -49,8 +52,16 @@ ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
 ami_ptrn_with_release_date = config.get('mount_backups',
                                         'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
+ssh_grp = config.get('DEFAULT', 'ssh_security_group')
+ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
+ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
 env.update({'load_known_hosts': False, 'user': username})
+
+
+def _print_dbg(text):
+    if debug:
+        print 'DEBUG: {0}'.format(text)
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -94,8 +105,21 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
             attr = getattr(attr, attr_name)
         return attr
     sleep_for = 3
-    if get_nested_attr(obj, attrs) != state:
-        if getattr(obj, 'region', None):
+    _print_dbg('Calling {0} updates'.format(obj))
+    for i in range(10):     # Resource may be reported as "not exists"
+        try:                # right after creation.
+            getattr(obj, update_attr)()
+        except:
+            pass
+        else:
+            break
+    getattr(obj, update_attr)()
+    _print_dbg('Called {0} update'.format(obj))
+    obj_state = get_nested_attr(obj, attrs)
+    obj_region = getattr(obj, 'region', None)
+    _print_dbg('State fetched from {0} in {1}'.format(obj, obj_region))
+    if obj_state != state:
+        if obj_region:
             info = 'Waiting for the {obj} in {obj.region} to be {state}...'
         else:
             info = 'Waiting for the {obj} to be {state}...'
@@ -108,11 +132,11 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         print 'done.'
 
 
-class WaitForProper(object):
+class _WaitForProper(object):
 
     """Decorate consecutive exceptions eating.
 
-    >>> @WaitForProper(attempts=3, pause=5)
+    >>> @_WaitForProper(attempts=3, pause=5)
     ... def test():
     ...     1 / 0
     ... 
@@ -137,7 +161,7 @@ class WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    print repr(err)
+                    print _format_exc() if debug else repr(err)
                     if attempts > 0:
                         msg = ' waiting next {0} sec ({1} times left)'
                         print msg.format(self.pause, attempts)
@@ -146,7 +170,8 @@ class WaitForProper(object):
                     break
         return wrapper
 
-wait_for_sudo = WaitForProper()(sudo)
+_wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
+                                pause=ssh_timeout_interval)(sudo)
 
 
 def _clone_tags(src_res, dst_res):
@@ -215,13 +240,24 @@ def _get_all_snapshots(region=None, id_only=False):
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
 
-def modify_instance_termination(region, instance_id=None):
-    inst = _get_inst_by_id(region, instance_id)
+
+def modify_instance_termination(region, instance_id):
+    """Mark production instnaces as uneligible for termination.
+
+    region
+        name of region where instance is located;
+    instance_id
+        instance to be updated;
+
+    You must change value of preconfigured tag_name and run this command
+    before terminating production instance via API."""
     conn = _get_region_by_name(region).connect()
-    tag = inst.tags.get('Earmarking')
-    if tag=='production':
-        conn.modify_instance_attribute(instance_id,
-                      'disableApiTermination', True)
+    inst = _get_inst_by_id(conn.region.name, instance_id)
+    prod_tag = config.get(conn.region.name, 'tag_name')
+    prod_val = config.get(conn.region.name, 'tag_value')
+    inst_tag_val = inst.tags.get(prod_tag)
+    inst.modify_attribute('disableApiTermination', inst_tag_val == prod_val)
+
 
 def _select_snapshot():
     region_name = _prompt_to_select([reg.name for reg in _regions()],
@@ -292,7 +328,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Type': instance.instance_type,
         'Arch': instance.architecture,
         'Root_dev_name': instance.root_device_name,
-        'Time': datetime.utcnow().isoformat() #Too long, max 255 chars at all
+        'Time': datetime.utcnow().isoformat(),
         }, [instance])
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
@@ -556,13 +592,12 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     key_pair = key_pair or config.get(region.name, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
                             placement=zone, security_groups=security_groups)
-
-    print '{res.instances[0]} created in {zone}'.format(res=reservation,
-                                                         zone=zone)
-
     assert len(reservation.instances) == 1, 'More than 1 instances created'
+    inst = reservation.instances[0]
+    _wait_for(inst, ['state', ], 'running')
+    print '{inst} created in {zone}'.format(inst=inst, zone=zone)
 
-    return reservation.instances[0]
+    return inst
 
 
 @_contextmanager
@@ -570,7 +605,6 @@ def _create_temp_inst(zone, key_pair=None, security_groups=None):
     inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                            security_groups=security_groups)
     inst.add_tag('Earmarking', 'temporary')
-    _wait_for(inst, ['state', ], 'running')
     try:
         yield inst
     finally:
@@ -596,12 +630,15 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
         try:
             volume = conn.create_volume(snap.volume_size, zone, snap)
             _clone_tags(snap, volume)
+            _print_dbg('Tags cloned from {0} to {1}'.format(snap, volume))
             try:
                 with _create_temp_inst(
                     zone, key_pair=key_pair, security_groups=security_groups) \
                     as inst:
                     dev_name = _get_avail_dev(inst)
+                    _print_dbg('Got avail {0} from {1}'.format(dev_name, inst))
                     volume.attach(inst.id, dev_name)
+                    _print_dbg('Attached {0} to {1}'.format(volume, inst))
                     volume.update()
                     _wait_for(volume, ['attach_data', 'status'], 'attached')
                     yield volume
@@ -609,8 +646,8 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                 _wait_for(volume, ['status', ], 'available')
                 print 'Deleting {vol} in {vol.region}...'.format(vol=volume)
                 volume.delete()
-        except _BotoServerError, err:
-            print '{0} in {1}'.format(err, zone)
+        except _BotoServerError as err:
+            print _format_exc() if debug else '{0} in {1}'.format(err, zone)
             continue
         else:
             break
@@ -627,7 +664,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
-    inst_devices = wait_for_sudo('ls /dev').split()
+    inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
             return '/dev/{0}'.format(dev)
@@ -649,7 +686,7 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
                 'key_filename': key_filename})
     dev = _get_vol_dev(vol, key_filename)
     mountpoint = dev.replace('/dev/', '/media/')
-    wait_for_sudo('mkdir {0}'.format(mountpoint))
+    _wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
@@ -673,16 +710,9 @@ def _config_temp_ssh(conn):
     key_pair.save('./')
     _chmod(key_filename, 0600)
 
-    if config_name in [s_g.name for s_g in conn.get_all_security_groups()]:
-        conn.delete_security_group(config_name)
-    security_group = conn.create_security_group(
-        config_name, 'Created for temporary SSH access')
-    security_group.authorize('tcp', '22', '22', '0.0.0.0/0')
-
     try:
-        yield _realpath(key_filename), security_group.name
+        yield _realpath(key_filename)
     finally:
-        security_group.delete()
         key_pair.delete()
         _remove(key_filename)
 
@@ -703,8 +733,8 @@ def mount_snapshot(region_name=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _config_temp_ssh(conn) as (key_file, sec_group):
-        with _attach_snapshot(snap, security_groups=[sec_group]) as vol:
+    with _config_temp_ssh(conn) as key_file:
+        with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
             mountpoint = _mount_volume(vol)
             if mountpoint:
                 info += ('\nand browse snapshot, mounted at {mountpoint}.')
@@ -747,8 +777,8 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
     """Run `rsync` to update dst_vol from src_snap."""
 
     src_conn = src_snap.region.connect()
-    with _config_temp_ssh(src_conn) as (src_key_file, sec_grp):
-        with _attach_snapshot(src_snap, security_groups=[sec_grp]) as src_vol:
+    with _config_temp_ssh(src_conn) as src_key_file:
+        with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
             src_mnt = _mount_volume(src_vol)
             dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
             src_inst = _get_inst_by_id(src_vol.region.name,
@@ -798,17 +828,17 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
         print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_snap.region)
         return
 
-    with _config_temp_ssh(dst_conn) as (key_file, sec_group):
+    with _config_temp_ssh(dst_conn) as key_file:
         key_pair = _splitext(_split(key_file)[1])[0]
 
         if dst_snap:
-            with _attach_snapshot(dst_snap, key_pair, [sec_group]) as dst_vol:
+            with _attach_snapshot(dst_snap, key_pair, [ssh_grp]) as dst_vol:
                 _rsync_snap_to_vol(src_snap, dst_vol, key_file)
                 _create_fresh_snap(dst_vol, src_snap)
             dst_snap.delete()
         else:
             dst_zn = dst_conn.get_all_zones()[-1]     # Just latest zone.
-            with _create_temp_inst(dst_zn, key_pair, [sec_group]) as dst_inst:
+            with _create_temp_inst(dst_zn, key_pair, [ssh_grp]) as dst_inst:
                 dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zn)
                 _clone_tags(src_snap, dst_vol)
                 dst_dev = _get_avail_dev(dst_inst)
@@ -843,8 +873,9 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
 
+
 def create_ami(region=None, snap_id=None, force=None, encrypted_root=None,
-              key_pair=None):
+               key_pair=None):
     """
     Creates AMI image from given snapshot.
 
