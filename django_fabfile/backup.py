@@ -17,6 +17,7 @@ from os.path import (
     splitext as _splitext)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
+from random import choice as _choice
 from re import compile as _compile, match as _match
 from string import lowercase
 from time import sleep as _sleep
@@ -923,11 +924,17 @@ def create_ami(region=None, snap_id=None, force=None, key_pair=None,
         _security_groups = _prompt_to_select(
             [sec.name for sec in conn.get_all_security_groups()],
             'Select security group')
+        kernels = conn.get_all_images(filters={
+            'image-type': 'kernel',
+            'architecture': image.architecture,
+            'owner-id': ubuntu_aws_account})
+        _wait_for(image, ['state'], 'available')
         reservation = image.run(
             key_name = key_pair or config.get(_get_region_by_name(region).name,
                                               'key_pair'),
             security_groups = [_security_groups, ],
-            instance_type = _get_descr_attr(snap, 'Type') or inst_type)
+            instance_type = _get_descr_attr(snap, 'Type') or inst_type,
+            kernel_id=_choice(kernels).id)
         new_instance = reservation.instances[0]
         _wait_for(new_instance, ['state', ], 'running')
         _clone_tags(snap, new_instance)
