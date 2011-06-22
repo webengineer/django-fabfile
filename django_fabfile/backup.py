@@ -4,6 +4,10 @@ Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
 All other options will be taken from ./fabfile.cfg file.
+
+Commands presented to user (i.e. functions without preceeding
+underscore) should guess region by beginning if its name using
+`_get_region_by_name()`.
 '''
 
 from datetime import timedelta as _timedelta, datetime
@@ -11,13 +15,13 @@ from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
+from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
     splitext as _splitext)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
-from random import choice as _choice
 from re import compile as _compile, match as _match
 from string import lowercase
 from time import sleep as _sleep
@@ -44,14 +48,15 @@ for reg in _regions():
             config.write(f_p)
 
 debug = config.getboolean('DEFAULT', 'debug')
-username = config.get('mount_backups', 'username')
-ubuntu_aws_account = config.get('mount_backups', 'ubuntu_aws_account')
-architecture = config.get('mount_backups', 'architecture')
-ami_ptrn = config.get('mount_backups', 'ami_ptrn')
-ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
-ami_ptrn_with_release_date = config.get('mount_backups',
+username = config.get('DEFAULT', 'username')
+ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
+architecture = config.get('DEFAULT', 'architecture')
+aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
+ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
+ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
+ami_ptrn_with_release_date = config.get('DEFAULT',
                                         'ami_ptrn_with_release_date')
-ami_regexp = config.get('mount_backups', 'ami_regexp')
+ami_regexp = config.get('DEFAULT', 'ami_regexp')
 ssh_grp = config.get('DEFAULT', 'ssh_security_group')
 ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
 ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
@@ -201,6 +206,15 @@ def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
+
+
+def _get_latest_aki(conn, architecture):
+    kernels = conn.get_all_images(filters={
+        'image-type': 'kernel',
+        'architecture': architecture,
+        'owner-id': ubuntu_aws_account,
+        'name': aki_ptrn})
+    return sorted(kernels, key=_attrgetter('name'))[-1]
 
 
 def _get_region_by_name(region_name):
@@ -879,8 +893,31 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
 
 
-def create_ami(region=None, snap_id=None, force=None, key_pair=None,
-               root_dev='/dev/sda1', inst_arch='x86_64', inst_type='t1.micro'):
+def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+    conn = _get_region_by_name(region_name).connect()
+    image = conn.get_all_images([ami_id])[0]
+    inst_type = inst_type or _get_descr_attr(image, 'Type') or 't1.micro'
+    _security_groups = _prompt_to_select(
+        [sec.name for sec in conn.get_all_security_groups()],
+        'Select security group')
+    _wait_for(image, ['state'], 'available')
+    key_file = config.get(conn.region.name, 'key_pair')
+    reservation = image.run(
+        key_name = key_file,
+        security_groups = [_security_groups, ],
+        instance_type = inst_type,
+        kernel_id=_get_latest_aki(conn, image.architecture).id)
+    new_instance = reservation.instances[0]
+    _wait_for(new_instance, ['state', ], 'running')
+    _clone_tags(image, new_instance)
+    modify_instance_termination(conn.region.name, new_instance.id)
+    info = ('\nYou may now SSH into the {inst} server, using:'
+            '\n ssh -i {key} {user}@{inst.public_dns_name}')
+    print info.format(inst=new_instance, user=username, key=key_file)
+
+
+def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
+               inst_arch='x86_64', inst_type='t1.micro'):
     """
     Creates AMI image from given snapshot.
 
@@ -890,8 +927,8 @@ def create_ami(region=None, snap_id=None, force=None, key_pair=None,
         specify snapshot to be processed; snapshot description must be
         json description of snapshotted instance.
     force
-        Run instance from ami reation without confirmation. To enable
-        set value to "RUN";
+        Run instance from ami after creation without confirmation. To
+        enable set value to "RUN";
     """
     if not region or not snap_id:
         region, snap_id = _select_snapshot()
@@ -921,21 +958,4 @@ def create_ami(region=None, snap_id=None, force=None, key_pair=None,
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        _security_groups = _prompt_to_select(
-            [sec.name for sec in conn.get_all_security_groups()],
-            'Select security group')
-        kernels = conn.get_all_images(filters={
-            'image-type': 'kernel',
-            'architecture': image.architecture,
-            'owner-id': ubuntu_aws_account})
-        _wait_for(image, ['state'], 'available')
-        reservation = image.run(
-            key_name = key_pair or config.get(_get_region_by_name(region).name,
-                                              'key_pair'),
-            security_groups = [_security_groups, ],
-            instance_type = _get_descr_attr(snap, 'Type') or inst_type,
-            kernel_id=_choice(kernels).id)
-        new_instance = reservation.instances[0]
-        _wait_for(new_instance, ['state', ], 'running')
-        _clone_tags(snap, new_instance)
-        modify_instance_termination(region, new_instance.id)
+        launch_instance_from_ami(region, image.id)
