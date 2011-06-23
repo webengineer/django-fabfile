@@ -28,11 +28,15 @@ kerneli386 = aki-13d5aa41
 kernelx86_64 = aki-4feec43b
 kerneli386 = aki-4deec439
 
+[ap-northeast-1]
+kernelx86_64 = aki-d409a2d5
+kerneli386 = aki-d209a2d3
+
 [mount_backups]
 username = ubuntu
 root_device_type = ebs
 ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
-ami_ptrn_with_relase_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
+ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 architecture = x86_64
 mountpoint = /media/snapshot

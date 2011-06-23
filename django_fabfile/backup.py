@@ -48,7 +48,7 @@ ami_ptrn = config.get('mount_backups', 'ami_ptrn')
 ami_ptrn_with_version = config.get('mount_backups',
                                           'ami_ptrn_with_version')
 ami_ptrn_with_relase_date = config.get('mount_backups',
-                                      'ami_ptrn_with_relase_date')
+                                      'ami_ptrn_with_release_date')
 ami_regexp = config.get('mount_backups', 'ami_regexp')
 
 
@@ -844,7 +844,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
 
 def modify_kernel(region, instance_id):
     """
-    Modify kernel for stopped instance
+    Modify old kernel for stopped instance
     (needed for make pv-grub working)
     NOTICE: install grub-legacy-ec2 and upgrades before run this.
     region
@@ -861,7 +861,15 @@ def modify_kernel(region, instance_id):
         us-west-1       x86_64  aki-9ba0f1de
         us-west-1       i386    aki-99a0f1dc
     """
+    key_filename = config.get(region, 'key_filename')
     instance = _get_instance_by_id(region, instance_id)
+    env.update({
+        'host_string': instance.public_dns_name,
+        'key_filename': key_filename,
+        'load_known_hosts': False,
+        'user': username,
+    })
+    sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
     kernel = config.get(region, 'kernel'+instance.architecture)
     instance.stop()
     _wait_for(instance, ['state',], 'stopped')
