@@ -902,7 +902,10 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
     for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
-        rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
+        try:
+            rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
+        except:
+            print _format_exc()
 
 
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
