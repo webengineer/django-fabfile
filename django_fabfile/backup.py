@@ -187,9 +187,9 @@ def _clone_tags(src_res, dst_res):
         dst_res.add_tag(tag, src_res.tags[tag])
 
 
-def _get_descr_attr(snap, attr):
+def _get_descr_attr(resource, attr):
     try:
-        return _loads(snap.description)[attr]
+        return _loads(resource.description)[attr]
     except:
         pass
 
@@ -875,7 +875,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
-                 tag_value=None):
+                 tag_value=None, native_only=True):
     """Duplicates latest snapshots with given tag into dst_region.
 
     src_region_name, dst_region_name
@@ -884,7 +884,9 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         dst_region;
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from
-        config by default, may be configured per region."""
+        config by default, may be configured per region;
+    native
+        sync only snapshots, created in the src_region_name."""
     src_region = _get_region_by_name(src_region_name)
     conn = src_region.connect()
     tag_name = tag_name or config.get(src_region.name, 'tag_name')
@@ -893,13 +895,26 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
     _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
-    snaps = sorted(snaps, key=_get_snap_vol)
+    if native_only:
+        def _is_native(snap, region):
+            return _get_descr_attr(snap, 'Region') == region.name
+        snaps = [snp for snp in snaps if _is_native(snp, src_region)]
+    snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
     for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
         rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
 
 
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+    """Create instance from specified AMI.
+
+    region_name
+        location of the AMI and new instance;
+    ami_id
+        "ami-..."
+    inst_type
+        by default will be fetched from AMI description or used
+        't1.micro' if not mentioned in the description."""
     conn = _get_region_by_name(region_name).connect()
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or _get_descr_attr(image, 'Type') or 't1.micro'
@@ -907,9 +922,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         [sec.name for sec in conn.get_all_security_groups()],
         'Select security group')
     _wait_for(image, ['state'], 'available')
-    key_file = config.get(conn.region.name, 'key_pair')
     reservation = image.run(
-        key_name = key_file,
+        key_name = config.get(conn.region.name, 'key_pair'),
         security_groups = [_security_groups, ],
         instance_type = inst_type,
         kernel_id=_get_latest_aki(conn, image.architecture).id)
@@ -919,6 +933,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     modify_instance_termination(conn.region.name, new_instance.id)
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
+    key_file = config.get(conn.region.name, 'key_filename')
     print info.format(inst=new_instance, user=username, key=key_file)
 
 
@@ -964,4 +979,4 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        launch_instance_from_ami(region, image.id)
+        launch_instance_from_ami(region, image.id, inst_type=inst_type)

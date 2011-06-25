@@ -1,3 +1,10 @@
+Version 2011.06.25.2
+--------------------
+
+* Added `native_only` argument to the `django_fabfile.backup.rsync_region`
+  function. With default value `True` it synchronze only locally created
+  snapshots.
+
 Version 2011.06.25.1
 --------------------
 
@@ -7,8 +14,8 @@ Please update your local version of fabfile.cfg:
 
 * add `aki_ptrn` to `DEFAULT` section
 * move `architecture`, `ami_ptrn`, `ami_ptrn_with_version`,
-`ami_ptrn_with_release_date`, `ami_regexp`, `tag_name`, `tag_value`,
-`ubuntu_aws_account`, `username` to `DEFAULT` section
+  `ami_ptrn_with_release_date`, `ami_regexp`, `ubuntu_aws_account`, `username`
+  to `DEFAULT` section
 
 Version 2011.06.19.1
 --------------------
