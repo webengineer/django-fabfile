@@ -693,7 +693,10 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     """Mount the device by SSH. Return mountpoint on success.
 
     vol
-        volume to be mounted on the instance it is attached to."""
+        volume to be mounted on the instance it is attached to;
+    key_filename
+        location of the private key to access instance, where `vol` is
+        mounted. Fetched from config by default."""
 
     vol.update()
     inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
@@ -772,6 +775,10 @@ def mount_snapshot(region_name=None, snap_id=None):
 
 
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
+    """Run `rsync` against mountpoints.
+
+    dst_key_file
+        private key that will be used in src_inst to access dst_inst."""
     env.update({'host_string': dst_inst.public_dns_name,
                 'key_filename': dst_key_file})
     sudo('cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.bak')
@@ -795,16 +802,15 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
     """Run `rsync` to update dst_vol from src_snap."""
 
     src_conn = src_snap.region.connect()
-    with _config_temp_ssh(src_conn) as src_key_file:
-        with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
-            src_mnt = _mount_volume(src_vol)
-            dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
-            src_inst = _get_inst_by_id(src_vol.region.name,
-                                       src_vol.attach_data.instance_id)
-            dst_inst = _get_inst_by_id(dst_vol.region.name,
-                                       dst_vol.attach_data.instance_id)
-            _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
-                               dst_key_file)
+    with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
+        src_mnt = _mount_volume(src_vol)
+        dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
+        src_inst = _get_inst_by_id(src_vol.region.name,
+                                   src_vol.attach_data.instance_id)
+        dst_inst = _get_inst_by_id(dst_vol.region.name,
+                                   dst_vol.attach_data.instance_id)
+        _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
+                           dst_key_file)
 
 
 def _create_fresh_snap(dst_vol, src_snap):
