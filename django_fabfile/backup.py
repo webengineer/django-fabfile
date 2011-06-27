@@ -682,6 +682,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
+    _print_dbg(_PrettyPrinter().pformat(env))
     inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
