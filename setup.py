@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
 
 from django_fabfile import __doc__
@@ -7,17 +8,20 @@ setup(
     name='django-fabfile',
     url='http://redmine.odeskps.com/projects/django-fabfile',
     download_url='http://pypi.odeskps.com/django-fabfile',
-    version='0.9.6.4',
+    version='2011.06.25.3',
     description='Deployment Django projects with Fabric.',
     install_requires=[
         'boto>=2.0b4',
-        'Fabric>=0.9.3',
+        'Fabric>=1.0.1',
     ],
     long_description=__doc__,
-    maintainer='Yury Yurevich',
-    maintainer_email='yyurevich@jellycrystal.com',
+    maintainer='Max Chervonec',
+    maintainer_email='electedm@odesk.com',
     packages=find_packages(),
     include_package_data=False,
+    package_data = {
+        '': ['*.rst', '*.def'],
+    },
     zip_safe=True,
     # Get more strings from http://www.python.org/pypi?:action=list_classifiers
     classifiers=[
