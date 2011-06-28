@@ -61,7 +61,7 @@ ssh_grp = config.get('DEFAULT', 'ssh_security_group')
 ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
 ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
-env.update({'load_known_hosts': False, 'user': username})
+env.update({'disable_known_hosts': True, 'user': username})
 
 
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
@@ -738,7 +738,6 @@ def _config_temp_ssh(conn):
         key_pair.delete()
         _remove(key_filename)
 
-
 def mount_snapshot(region_name=None, snap_id=None):
 
     """Mount snapshot to temporary created instance.
@@ -755,24 +754,23 @@ def mount_snapshot(region_name=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _config_temp_ssh(conn) as key_file:
-        with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
-            mountpoint = _mount_volume(vol)
-            if mountpoint:
-                info += ('\nand browse snapshot, mounted at {mountpoint}.')
-            else:
-                info += ('\nand mount {device}. NOTE: device name may be '
-                         'altered by system.')
-            key_file = config.get(region.name, 'key_filename')
-            inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
-            print info.format(
-                inst=inst, user=username, key=key_file,
-                device=vol.attach_data.device, mountpoint=mountpoint)
+    with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
+        mountpoint = _mount_volume(vol)
+        if mountpoint:
+            info += ('\nand browse snapshot, mounted at {mountpoint}.')
+        else:
+            info += ('\nand mount {device}. NOTE: device name may be '
+                     'altered by system.')
+        key_file = config.get(region.name, 'key_filename')
+        inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
+        print info.format(
+            inst=inst, user=username, key=key_file,
+            device=vol.attach_data.device, mountpoint=mountpoint)
 
-            info = ('\nEnter FINISHED if you are finished looking at the '
-                    'backup and would like to cleanup: ')
-            while raw_input(info).strip() != 'FINISHED':
-                pass
+        info = ('\nEnter FINISHED if you are finished looking at the '
+                'backup and would like to cleanup: ')
+        while raw_input(info).strip() != 'FINISHED':
+            pass
 
 
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
