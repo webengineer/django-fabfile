@@ -4,6 +4,10 @@ Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
 All other options will be taken from ./fabfile.cfg file.
+
+Commands presented to user (i.e. functions without preceeding
+underscore) should guess region by beginning if its name using
+`_get_region_by_name()`.
 '''
 
 from datetime import timedelta as _timedelta, datetime
@@ -11,6 +15,7 @@ from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
+from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
@@ -25,10 +30,12 @@ from warnings import warn as _warn
 
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
+from boto.ec2.blockdevicemapping import (
+    BlockDeviceMapping as _BlockDeviceMapping,
+    EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
-    EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, prompt, sudo
-from fabric.operations import put
+                            EC2ResponseError as _EC2ResponseError)
+from fabric.api import env, prompt, put, sudo
 
 
 config_file = 'fabfile.cfg'
@@ -41,26 +48,23 @@ for reg in _regions():
             config.write(f_p)
 
 debug = config.getboolean('DEFAULT', 'debug')
-hourly_backups = config.getint('purge_backups', 'hourly_backups')
-daily_backups = config.getint('purge_backups', 'daily_backups')
-weekly_backups = config.getint('purge_backups', 'weekly_backups')
-monthly_backups = config.getint('purge_backups', 'monthly_backups')
-quarterly_backups = config.getint('purge_backups', 'quarterly_backups')
-yearly_backups = config.getint('purge_backups', 'yearly_backups')
-
-username = config.get('mount_backups', 'username')
-ubuntu_aws_account = config.get('mount_backups', 'ubuntu_aws_account')
-architecture = config.get('mount_backups', 'architecture')
-ami_ptrn = config.get('mount_backups', 'ami_ptrn')
-ami_ptrn_with_version = config.get('mount_backups', 'ami_ptrn_with_version')
-ami_ptrn_with_release_date = config.get('mount_backups',
+username = config.get('DEFAULT', 'username')
+ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
+architecture = config.get('DEFAULT', 'architecture')
+aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
+ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
+ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
+ami_ptrn_with_release_date = config.get('DEFAULT',
                                         'ami_ptrn_with_release_date')
-ami_regexp = config.get('mount_backups', 'ami_regexp')
+ami_regexp = config.get('DEFAULT', 'ami_regexp')
 ssh_grp = config.get('DEFAULT', 'ssh_security_group')
 ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
 ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
-env.update({'load_known_hosts': False, 'user': username})
+env.update({'disable_known_hosts': True, 'user': username})
+
+
+_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _print_dbg(text):
@@ -183,24 +187,34 @@ def _clone_tags(src_res, dst_res):
         dst_res.add_tag(tag, src_res.tags[tag])
 
 
-def _get_snap_vol(snap):
+def _get_descr_attr(resource, attr):
     try:
-        return _loads(snap.description)['Volume']
+        return _loads(resource.description)[attr]
     except:
         pass
+
+
+def _get_snap_vol(snap):
+    return _get_descr_attr(snap, 'Volume')
 
 
 def _get_snap_time(snap):
-    try:
-        return _loads(snap.description)['Time']
-    except:
-        pass
+    return _get_descr_attr(snap, 'Time')
 
 
 def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
+
+
+def _get_latest_aki(conn, architecture):
+    kernels = conn.get_all_images(filters={
+        'image-type': 'kernel',
+        'architecture': architecture,
+        'owner-id': ubuntu_aws_account,
+        'name': aki_ptrn})
+    return sorted(kernels, key=_attrgetter('name'))[-1]
 
 
 def _get_region_by_name(region_name):
@@ -329,7 +343,11 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Volume': vol_id,
         'Region': region.name,
         'Device': dev,
-        'Time': datetime.utcnow().isoformat()}, [instance])
+        'Type': instance.instance_type,
+        'Arch': instance.architecture,
+        'Root_dev_name': instance.root_device_name,
+        'Time': _now(),
+        }, [instance])
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
     _clone_tags(instance, snapshot)
@@ -383,16 +401,18 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None):
     return snapshots
 
 
-def _trim_snapshots(
-    region_name, hourly_backups=hourly_backups, daily_backups=daily_backups,
-    weekly_backups=weekly_backups, monthly_backups=monthly_backups,
-    quarterly_backups=quarterly_backups, yearly_backups=yearly_backups,
-    dry_run=False):
+def _trim_snapshots(region_name, dry_run=False):
 
     """Delete snapshots back in time in logarithmic manner.
 
     dry_run
         just print snapshot to be deleted."""
+    hourly_backups = config.getint('purge_backups', 'hourly_backups')
+    daily_backups = config.getint('purge_backups', 'daily_backups')
+    weekly_backups = config.getint('purge_backups', 'weekly_backups')
+    monthly_backups = config.getint('purge_backups', 'monthly_backups')
+    quarterly_backups = config.getint('purge_backups', 'quarterly_backups')
+    yearly_backups = config.getint('purge_backups', 'yearly_backups')
 
     conn = _get_region_by_name(region_name).connect()
     # work with UTC time, which is what the snapshot start time is reported in
@@ -662,6 +682,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
+    _print_dbg(_PrettyPrinter().pformat(env))
     inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
@@ -673,7 +694,10 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     """Mount the device by SSH. Return mountpoint on success.
 
     vol
-        volume to be mounted on the instance it is attached to."""
+        volume to be mounted on the instance it is attached to;
+    key_filename
+        location of the private key to access instance, where `vol` is
+        mounted. Fetched from config by default."""
 
     vol.update()
     inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
@@ -696,8 +720,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
 
 @_contextmanager
 def _config_temp_ssh(conn):
-    config_name = '{region}-temp-ssh-{now}'.format(
-        region=conn.region.name, now=datetime.utcnow().isoformat())
+    config_name = '{region}-temp-ssh-{now}'.format(region=conn.region.name,
+                                                   now=_now())
 
     if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
         conn.delete_key_pair(config_name)
@@ -713,7 +737,6 @@ def _config_temp_ssh(conn):
     finally:
         key_pair.delete()
         _remove(key_filename)
-
 
 def mount_snapshot(region_name=None, snap_id=None):
 
@@ -731,27 +754,30 @@ def mount_snapshot(region_name=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _config_temp_ssh(conn) as key_file:
-        with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
-            mountpoint = _mount_volume(vol)
-            if mountpoint:
-                info += ('\nand browse snapshot, mounted at {mountpoint}.')
-            else:
-                info += ('\nand mount {device}. NOTE: device name may be '
-                         'altered by system.')
-            key_file = config.get(region.name, 'key_filename')
-            inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
-            print info.format(
-                inst=inst, user=username, key=key_file,
-                device=vol.attach_data.device, mountpoint=mountpoint)
+    with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
+        mountpoint = _mount_volume(vol)
+        if mountpoint:
+            info += ('\nand browse snapshot, mounted at {mountpoint}.')
+        else:
+            info += ('\nand mount {device}. NOTE: device name may be '
+                     'altered by system.')
+        key_file = config.get(region.name, 'key_filename')
+        inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
+        print info.format(
+            inst=inst, user=username, key=key_file,
+            device=vol.attach_data.device, mountpoint=mountpoint)
 
-            info = ('\nEnter FINISHED if you are finished looking at the '
-                    'backup and would like to cleanup: ')
-            while raw_input(info).strip() != 'FINISHED':
-                pass
+        info = ('\nEnter FINISHED if you are finished looking at the '
+                'backup and would like to cleanup: ')
+        while raw_input(info).strip() != 'FINISHED':
+            pass
 
 
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
+    """Run `rsync` against mountpoints.
+
+    dst_key_file
+        private key that will be used in src_inst to access dst_inst."""
     env.update({'host_string': dst_inst.public_dns_name,
                 'key_filename': dst_key_file})
     sudo('cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.bak')
@@ -775,16 +801,15 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
     """Run `rsync` to update dst_vol from src_snap."""
 
     src_conn = src_snap.region.connect()
-    with _config_temp_ssh(src_conn) as src_key_file:
-        with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
-            src_mnt = _mount_volume(src_vol)
-            dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
-            src_inst = _get_inst_by_id(src_vol.region.name,
-                                       src_vol.attach_data.instance_id)
-            dst_inst = _get_inst_by_id(dst_vol.region.name,
-                                       dst_vol.attach_data.instance_id)
-            _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
-                               dst_key_file)
+    with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
+        src_mnt = _mount_volume(src_vol)
+        dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
+        src_inst = _get_inst_by_id(src_vol.region.name,
+                                   src_vol.attach_data.instance_id)
+        dst_inst = _get_inst_by_id(dst_vol.region.name,
+                                   dst_vol.attach_data.instance_id)
+        _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
+                           dst_key_file)
 
 
 def _create_fresh_snap(dst_vol, src_snap):
@@ -805,7 +830,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
     snapshot_id
         snapshot to duplicate."""
     src_conn = _get_region_by_name(src_region_name).connect()
-    dst_conn = _get_region_by_name(dst_region_name).connect()
+    dst_reg = _get_region_by_name(dst_region_name)
+    dst_conn = dst_reg.connect()
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
 
     info = 'Transmitting {snap} {snap.description}'
@@ -823,7 +849,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
     if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
         info = ' {src} is not newer than {dst} {dst.description} in {dst_reg}'
-        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_snap.region)
+        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_reg)
         return
 
     with _config_temp_ssh(dst_conn) as key_file:
@@ -848,7 +874,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
-                 tag_value=None):
+                 tag_value=None, native_only=True):
     """Duplicates latest snapshots with given tag into dst_region.
 
     src_region_name, dst_region_name
@@ -857,7 +883,9 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         dst_region;
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from
-        config by default, may be configured per region."""
+        config by default, may be configured per region;
+    native
+        sync only snapshots, created in the src_region_name."""
     src_region = _get_region_by_name(src_region_name)
     conn = src_region.connect()
     tag_name = tag_name or config.get(src_region.name, 'tag_name')
@@ -866,7 +894,91 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
     _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
-    snaps = sorted(snaps, key=_get_snap_vol)
+    if native_only:
+        def _is_native(snap, region):
+            return _get_descr_attr(snap, 'Region') == region.name
+        snaps = [snp for snp in snaps if _is_native(snp, src_region)]
+    snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
     for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
-        rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
+        try:
+            rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
+        except:
+            print _format_exc()
+
+
+def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+    """Create instance from specified AMI.
+
+    region_name
+        location of the AMI and new instance;
+    ami_id
+        "ami-..."
+    inst_type
+        by default will be fetched from AMI description or used
+        't1.micro' if not mentioned in the description."""
+    conn = _get_region_by_name(region_name).connect()
+    image = conn.get_all_images([ami_id])[0]
+    inst_type = inst_type or _get_descr_attr(image, 'Type') or 't1.micro'
+    _security_groups = _prompt_to_select(
+        [sec.name for sec in conn.get_all_security_groups()],
+        'Select security group')
+    _wait_for(image, ['state'], 'available')
+    reservation = image.run(
+        key_name = config.get(conn.region.name, 'key_pair'),
+        security_groups = [_security_groups, ],
+        instance_type = inst_type,
+        kernel_id=_get_latest_aki(conn, image.architecture).id)
+    new_instance = reservation.instances[0]
+    _wait_for(new_instance, ['state', ], 'running')
+    _clone_tags(image, new_instance)
+    modify_instance_termination(conn.region.name, new_instance.id)
+    info = ('\nYou may now SSH into the {inst} server, using:'
+            '\n ssh -i {key} {user}@{inst.public_dns_name}')
+    key_file = config.get(conn.region.name, 'key_filename')
+    print info.format(inst=new_instance, user=username, key=key_file)
+
+
+def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
+               inst_arch='x86_64', inst_type='t1.micro'):
+    """
+    Creates AMI image from given snapshot.
+
+    Force option removes prompt request and creates new instance from
+    created ami image.
+    region, snap_id
+        specify snapshot to be processed; snapshot description must be
+        json description of snapshotted instance.
+    force
+        Run instance from ami after creation without confirmation. To
+        enable set value to "RUN";
+    """
+    if not region or not snap_id:
+        region, snap_id = _select_snapshot()
+    conn = _get_region_by_name(region).connect()
+    snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
+    # setup for building an EBS boot snapshot"
+    ebs = _EBSBlockDeviceType()
+    ebs.snapshot_id = snap_id
+    block_map = _BlockDeviceMapping()
+    block_map[root_dev] = ebs
+
+    name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
+    name = name.replace(":", ".").replace(" ", "_")
+
+    # create the new AMI all options from snap JSON description:
+    result = conn.register_image(
+        name=name,
+        description = snap.description,
+        architecture = _get_descr_attr(snap, 'Arch') or inst_arch,
+        root_device_name = _get_descr_attr(snap, 'Root_dev_name') or root_dev,
+        block_device_map = block_map)
+    image = conn.get_all_images(image_ids=[result, ])[0]
+    _clone_tags(snap, image)
+
+    print 'The new AMI ID = ', result
+
+    info = ('\nEnter RUN if you want to launch instance using '
+            'just created {0}: '.format(image))
+    if force == 'RUN' or raw_input(info).strip() == 'RUN':
+        launch_instance_from_ami(region, image.id, inst_type=inst_type)
