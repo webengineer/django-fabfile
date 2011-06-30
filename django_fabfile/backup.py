@@ -19,7 +19,7 @@ from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
-    splitext as _splitext)
+    splitext as _splitext, isfile as _isfile)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile, match as _match
@@ -27,7 +27,6 @@ from string import lowercase
 from time import sleep as _sleep
 from traceback import format_exc as _format_exc
 from warnings import warn as _warn
-
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.ec2.blockdevicemapping import (
@@ -35,7 +34,7 @@ from boto.ec2.blockdevicemapping import (
     EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, prompt, put, sudo
+from fabric.api import env, settings, sudo, abort, put, prompt
 
 
 config_file = 'fabfile.cfg'
@@ -257,7 +256,6 @@ def _get_all_snapshots(region=None, id_only=False):
     for con in connections:
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
-
 
 def modify_instance_termination(region, instance_id):
     """Mark production instnaces as uneligible for termination.
@@ -982,3 +980,84 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         launch_instance_from_ami(region, image.id, inst_type=inst_type)
+
+def _sudo(cmd):
+    """ Shows output of cmd and allows interaction """
+    sudo(cmd, shell=False, pty=False)
+
+def _create_account(user, region, instance_ids, passwordless, sudo):
+    if not _isfile(user+'.pub'):
+        abort("%s does not exist" % user+'.pub')
+    env.ssh_key = user+'.pub'
+    env.username = user
+    if passwordless:
+        _sudo('adduser --disabled-password %(username)s' % env)
+        if sudo:
+            _sudo('sed -i "s/# %sudo ALL=NOPASSWD: ALL/'
+                            '%sudo ALL=NOPASSWD: ALL/" /etc/sudoers')
+            for group in ['sudo']:
+                with settings(group=group):
+                    _sudo('adduser %(username)s %(group)s' % env)
+    else:
+        _sudo('adduser %(username)s' % env)
+        if sudo:
+            for group in ['adm', 'admin', 'staff']:
+                with settings(group=group):
+                    _sudo('adduser %(username)s %(group)s' % env)
+    _sudo('mkdir -p /home/%(username)s/.ssh' % env)
+    _sudo('touch /home/%(username)s/.ssh/authorized_keys' % env)
+    _sudo('chown -R %(username)s: /home/%(username)s/.ssh' % env)
+    _sudo('chmod 700 /home/%(username)s/.ssh' % env)
+    put(user+'.pub', '/home/%(username)s/.ssh/authorized_keys' 
+                                      % env, use_sudo=True)
+    _sudo('chown -R %(username)s: /home/%(username)s/.'
+                                    'ssh/authorized_keys' % env)
+    _sudo('chmod 600 /home/%(username)s/.ssh/authorized_keys' % env)
+
+def deluser(name, region = None, instance_ids = None,):
+    """ 
+    Removes user <name> with deluser from "host1;host2" list in <region>
+    If region and instance_ids not set - script takes hosts amd key values
+    from command line (-H and -i).
+    """
+    if instance_ids and region:
+        instances_ids = list(unicode(instance_ids).split(';'))
+        for inst in instances_ids:
+            if inst:
+                _instance=_get_inst_by_id(region, inst)
+                key_filename = config.get(_instance.region.name, 
+                                                  'key_filename')
+                env.update({'host_string': _instance.public_dns_name,
+                    'key_filename': key_filename,'warn_only' : True})
+                env.username = name
+                _sudo('deluser %(username)s' % env)
+    else:
+        env.username = name
+        _sudo('deluser %(username)s' % env)
+
+def adduser(user, region = None, instance_ids = None, 
+                                passwordless = None, sudo = None):
+    """ 
+    :<user>,<region>,"host1;host2",<passwordless>,<sudo> 
+    creates new <username> with public SSH key on "host1;host2" list in 
+    <region>. If you want to create passwordless account - set any value to
+    <passwrdless> variable, if you want sudo rights - set any value to <sudo>.
+    File with public key must be in same directory.
+    If region and instance_ids not set - script takes hosts amd key values
+    from command line (-H and -i).
+    """
+    if instance_ids and region:
+        instances_ids = list(unicode(instance_ids).split(';'))
+        for inst in instances_ids:
+            if inst:
+                _instance=_get_inst_by_id(region, inst)
+                key_filename = config.get(_instance.region.name, 
+                                                      'key_filename')
+                env.update({'host_string': _instance.public_dns_name,
+                    'key_filename': key_filename})
+                _create_account(user, region, instance_ids, passwordless, 
+                                                                    sudo)
+    else:
+        _create_account(user, region, instance_ids, passwordless, sudo)
+        
+    
