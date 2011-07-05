@@ -351,6 +351,8 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
     _clone_tags(instance, snapshot)
+    print '{0} initiated from Volume:{1} of {2}'.format(snapshot, vol_id,
+                                                        instance)
     if synchronously:
         _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
