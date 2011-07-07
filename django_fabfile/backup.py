@@ -349,6 +349,8 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
     _clone_tags(instance, snapshot)
+    print '{0} initiated from Volume:{1} of {2}'.format(snapshot, vol_id,
+                                                        instance)
     if synchronously:
         _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
@@ -556,7 +558,6 @@ def trim_snapshots(region_name=None, dry_run=False):
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
-        regions_trim = _trim_snapshots(region_name=reg, dry_run=dry_run)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
@@ -699,7 +700,6 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
 
     vol.update()
     inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
-    dev_name = vol.attach_data.device
     key_filename = key_filename or config.get(vol.region.name, 'key_filename')
 
     env.update({'host_string': inst.public_dns_name,
@@ -735,6 +735,7 @@ def _config_temp_ssh(conn):
     finally:
         key_pair.delete()
         _remove(key_filename)
+
 
 def mount_snapshot(region_name=None, snap_id=None):
 
@@ -798,7 +799,6 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
 
     """Run `rsync` to update dst_vol from src_snap."""
 
-    src_conn = src_snap.region.connect()
     with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
         src_mnt = _mount_volume(src_vol)
         dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
@@ -893,6 +893,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
     if native_only:
+
         def _is_native(snap, region):
             return _get_descr_attr(snap, 'Region') == region.name
         snaps = [snp for snp in snaps if _is_native(snp, src_region)]
