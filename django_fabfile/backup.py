@@ -19,7 +19,7 @@ from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
-    splitext as _splitext, isfile as _isfile)
+    splitext as _splitext)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile, match as _match
@@ -27,6 +27,7 @@ from string import lowercase
 from time import sleep as _sleep
 from traceback import format_exc as _format_exc
 from warnings import warn as _warn
+
 from boto.ec2 import (connect_to_region as _connect_to_region,
                       regions as _regions)
 from boto.ec2.blockdevicemapping import (
@@ -34,7 +35,7 @@ from boto.ec2.blockdevicemapping import (
     EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, settings, sudo, abort, put, prompt
+from fabric.api import env, prompt, put, sudo
 
 
 config_file = 'fabfile.cfg'
@@ -256,6 +257,7 @@ def _get_all_snapshots(region=None, id_only=False):
     for con in connections:
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
+
 
 def modify_instance_termination(region, instance_id):
     """Mark production instnaces as uneligible for termination.
@@ -981,7 +983,3 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         launch_instance_from_ami(region, image.id, inst_type=inst_type)
-
-
-        
-    
