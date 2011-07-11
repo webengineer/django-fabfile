@@ -9,6 +9,9 @@ Commands presented to user (i.e. functions without preceeding
 underscore) should guess region by beginning if its name using
 `_get_region_by_name()`.
 '''
+import glob
+import logging
+import logging.handlers
 
 from datetime import timedelta as _timedelta, datetime
 from ConfigParser import ConfigParser as _ConfigParser
@@ -61,15 +64,33 @@ ssh_grp = config.get('DEFAULT', 'ssh_security_group')
 ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
 ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
-env.update({'load_known_hosts': False, 'user': username})
+env.update({'disable_known_hosts': True, 'user': username})
 
 
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _print_dbg(text):
+    """
+    Logging process
+    """
     if debug:
+        LOG_FILENAME = 'log_rotating_file.out'
+
+        # Set up a specific logger with our desired output level
+        my_logger = logging.getLogger('MyLogger')
+        my_logger.setLevel(logging.DEBUG)
+
+        # Add the log message handler to the logger
+        handler = logging.handlers.RotatingFileHandler(
+            LOG_FILENAME, maxBytes=512000, backupCount=30)
+
+        my_logger.addHandler(handler)
+        my_logger.debug('DEBUG: {0}'.format(text))
+
         print 'DEBUG: {0}'.format(text)
+
+    return
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -351,6 +372,8 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
     _clone_tags(instance, snapshot)
+    print '{0} initiated from Volume:{1} of {2}'.format(snapshot, vol_id,
+                                                        instance)
     if synchronously:
         _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
@@ -558,7 +581,6 @@ def trim_snapshots(region_name=None, dry_run=False):
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
-        regions_trim = _trim_snapshots(region_name=reg, dry_run=dry_run)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
@@ -682,6 +704,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
+    _print_dbg(_PrettyPrinter().pformat(env))
     inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
@@ -700,7 +723,6 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
 
     vol.update()
     inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
-    dev_name = vol.attach_data.device
     key_filename = key_filename or config.get(vol.region.name, 'key_filename')
 
     env.update({'host_string': inst.public_dns_name,
@@ -754,24 +776,23 @@ def mount_snapshot(region_name=None, snap_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _config_temp_ssh(conn) as key_file:
-        with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
-            mountpoint = _mount_volume(vol)
-            if mountpoint:
-                info += ('\nand browse snapshot, mounted at {mountpoint}.')
-            else:
-                info += ('\nand mount {device}. NOTE: device name may be '
-                         'altered by system.')
-            key_file = config.get(region.name, 'key_filename')
-            inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
-            print info.format(
-                inst=inst, user=username, key=key_file,
-                device=vol.attach_data.device, mountpoint=mountpoint)
+    with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
+        mountpoint = _mount_volume(vol)
+        if mountpoint:
+            info += ('\nand browse snapshot, mounted at {mountpoint}.')
+        else:
+            info += ('\nand mount {device}. NOTE: device name may be '
+                     'altered by system.')
+        key_file = config.get(region.name, 'key_filename')
+        inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
+        print info.format(
+            inst=inst, user=username, key=key_file,
+            device=vol.attach_data.device, mountpoint=mountpoint)
 
-            info = ('\nEnter FINISHED if you are finished looking at the '
-                    'backup and would like to cleanup: ')
-            while raw_input(info).strip() != 'FINISHED':
-                pass
+        info = ('\nEnter FINISHED if you are finished looking at the '
+                'backup and would like to cleanup: ')
+        while raw_input(info).strip() != 'FINISHED':
+            pass
 
 
 def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
@@ -801,7 +822,6 @@ def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
 
     """Run `rsync` to update dst_vol from src_snap."""
 
-    src_conn = src_snap.region.connect()
     with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
         src_mnt = _mount_volume(src_vol)
         dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
@@ -896,6 +916,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
     if native_only:
+
         def _is_native(snap, region):
             return _get_descr_attr(snap, 'Region') == region.name
         snaps = [snp for snp in snaps if _is_native(snp, src_region)]
