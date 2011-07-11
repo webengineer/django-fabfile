@@ -1,3 +1,8 @@
+Version 2011.06.28.1
+--------------------
+
+Added `adduser` and `deluser` commands to `django_fabfile.useradd` module.
+
 Version 2011.06.25.2
 --------------------
 
