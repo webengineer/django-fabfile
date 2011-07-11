@@ -1,91 +1,173 @@
+"""
+Add sudo shell access
+"""
+#!/usr/bin/python2.6
+
+from __future__ import with_statement
+
 import os.path
-from fabric.api import run, settings, env, cd, sudo
+import sys
 
-#@@@@ 
-from backup import _get_instance_by_id
+from StringIO import StringIO
+from time import sleep
 
-#@@@@ Added by asuvorov
-def add_sudo_shell_access(region, instance_id=None, pub_key_file, username='ubuntu'):
-    """ 
-    Creates Fabric command, which should add specified public key into authorized_keys file.
+from fabric import utils as fabric_utils
+from fabric.api import run, local, settings, env, cd, sudo
+from fabric.contrib import files
+from fab_deploy import utils
+
+import boto
+from boto.ec2 import connect_to_region
+
+
+# Some global variables. May be changed
+AWS_ACCESS_KEY = "AKIAI4XIBE35OJNLMY7A"
+AWS_SECURITY_ACCESS_KEY = "/+SbXWz+0Qt2Oi3SOLBUiLh8/7nPSW0RJB3Run8o"
+key_filename = "/home/copycat/.ssh/ec2-keypair"
+host_username = "ubuntu"
+#mount_point = ""
+mount_point = "/mnt/snapshot"
+
+log_output = StringIO()
+
+
+def log(data, newline=True):
     """
-    
-    #@@@@ Is this necessary?
+    Simple logger
+    """
+    sys.stdout.write(data)
+    log_output.write(data)
+
+    if newline:
+        sys.stdout.write('\n')
+        log_output.write('\n')
+
+
+@utils.run_as('root')
+def add_sudo_shell_access(region='us-east-1', instance_id='i-efbc9181',
+    pub_key_file='/home/copycat/.ssh/ec2-keypair', username='copycat'):
+    """
+    Creates Fabric command, which should add specified public key
+    into authorized_keys file.
+    Run as fab -f shell.py add_sudo_shell_access:[arg_list,...]
+    """
+
+    # Check the username
+    log('>>>> Check the username...')
+    username = username or env.conf.USER
     if username == 'root':
         return
-    
-#    if instance_id:
-        instance = _get_instance_by_id(region, instance_id)
+    log('.... OK')
 
-    if not instance:
-        with open(os.path.normpath(pub_key_file), 'rt') as f:
-            ssh_key = f.read()
+    # Create connection to AWS EC2
+    log('>>>> Connecting to ec2.%s.amazonaws.com...' % region)
+    #conn = boto.connect_ec2(AWS_ACCESS_KEY, AWS_SECURITY_ACCESS_KEY)
+    conn = connect_to_region(region, aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECURITY_ACCESS_KEY)
+    log('.... OK')
 
-        home_dir = '/home/%s' % username
+    # Check for volumes and their state
+    log('>>>> Check for volumes...')
+    vol = conn.get_all_volumes()
+    log('.... OK')
 
-        #@@@@ Ubuntu 10.04 Lucid, 32-bit, EBS boot in that region
-        amiid=ami-cb97c68e
+    for v in vol:
+        log('>>>> %s is %s and %s' % (v, v.update(), v.attachment_state()))
+    log('.... OK')
 
-        with (settings(warn_only=True)):
-            #@@@@ Add user to groups
-            run('adduser %s ' % username)
-            run('adduser %s adm' % username)
-            run('adduser %s admin' % username)
-            run('adduser %s staff' % username)
+    # Connecting to instance
+    # For test purposes we have only one known instance (i-1f146671)
+    log('>>>> Check for instances...')
+    res = conn.get_all_instances()
 
-            #@@@@ Create an ext3 file system for the device attached at /dev/sdh
-            run('mke2fs -F -j /dev/sdh')
-            run('mkdir %s') % home_dir
-            
-            #@@@@ Mount the new file system at this directory            
-            run('mount /dev/sdh %s' % home_dir)
-        
-            with cd(home_dir):
-                run('mkdir .ssh')
-                files.append('.ssh/authorized_keys', ssh_key)
-                run('chown -R %s:%s .ssh' % (username, username))
-                run('chmod 700 .ssh')
-                run('chmod -R 600 .ssh/authorized_keys')
+    for r in res:
+        log(">>>> %s is %s" % (r.instances[0], r.instances[0].update()))
+    log('.... OK')
 
-                #@@@@ some useful variables
-                zone = '%sa' % region
-                ssh_key='.ssh/authorized_keys'
-                i_type = ''
+    #@@@@ Connect to instance with instance_id
+    log('>>>> Connect to instance %s' % instance_id)
+    try:
+        res = conn.get_all_instances([instance_id, ])
+    except:
+        log('>>>> ERROR: The instance %s not found. Program will be terminated'
+            % instance_id)
+    else:
+        inst = res[0].instances[0]
+        log('.... OK')
 
-                run('ec2-run-instances --key %s --availability-zone % %s' % (ssh_key, zone, amiid))
-                #run('ec2-run-instances --key %s --region %s --availability-zone % --instance-type %s %s' % (ssh_key, region, zone, i_type, amiid))
-    
-            #line = '%s ALL=(ALL) NOPASSWD: ALL' % username
-            #files.append('/etc/sudoers', line)
+    # Copying public key file
+    log('>>>> Copying public key file...')
+    with open(os.path.normpath(pub_key_file), 'rt') as f:
+        ssh_key = f.read()
+    log('.... OK')
 
-"""
-#2470
-Object of request for change:
-> Amazon EC2 Ubuntu instances without available shell access can’t be used. Actually it’s a server without available login credentials. But filesystem still can be mounted to another instance. 
+    # Add user to groups (see adduser.py)
+    # Copy adduser.py to the instance
+    local('scp -i %s adduser.py %s@%s:/home/%s/' %
+        (key_filename, host_username, inst.public_dns_name, host_username))
 
-Goal of the request for change:
-> ^mount volume to another instance
-> ^modify filesystem of the mounted volume
-> ^launch original instance with modified volume, where provided credentials can be applied.
+    # Adjust environment variables
+    log('>>>> Open SSH connection to the instance %s' % inst)
+    env.update({
+        'host_string': inst.public_dns_name,
+        'key_filename': key_filename,
+        'load_known_hosts': False,
+        'user': host_username,
+    })
 
-Implementation details:
-> Clone repository git clone gitolite@repo.odeskps.com:bootcamp/django-fabfile
-> Create Fabric command django_fabfile.shell.add_sudo_shell_access with arguments region_name, instance_id, pub_key_file, username='ubuntu', which should add specified public key into authorized_keys file.
+    # Open SSH connection to the instance
+    while True:
+        try:
+            sudo('pwd')
+            break
+        except:
+            log('>>>> sshd still launching, waiting to try again...')
+            sleep(1)
 
-Command should create admin account with sudo privileges if no such user exists at the instance. Just FYI – admin accounts are created with following commands in generic case (cat addadmin.sh):
+    # Implement adduser.py in the instance
+    # (username and mount_point as argument)
+    sudo('python /home/%s/adduser.py %s %s/etc' %
+        (host_username, username, mount_point))
 
-#!/bin/bash
+    # Check out message, left by adduser.py in the instance:/tmp/adduser.msg
+    if files.contains('/tmp/adduser.msg', 'already exists',
+        exact=False, use_sudo=True):
+        print('>>>> The user %s already exits. Terminating program' % username)
+        # Clean up
+        sudo('rm -rf /home/%s/adduser.py' % host_username)
+        sudo('rm -f /tmp/adduser.msg')
+        return
+    else:
+        UID = 1000
+        print('>>>> Obtain UID')
 
-username=${1?"Usage: $0 username"}
+        # Obtain assigned to username UID
+        while not files.contains('/tmp/adduser.msg', str(UID),
+            exact=False, use_sudo=True):
+            print('>>>>')
+            UID = UID + 1
+        print ('.... OK %s') % UID
 
-sudo adduser $username
-sudo adduser $username adm
-sudo adduser $username admin
-sudo adduser $username staff
+    # Create ../home/username in the instance
+    home_dir = '%s/home/%s' % (mount_point, username)
+    sudo('mkdir -p %s' % home_dir)
 
-sudo mkdir /home/$username/.ssh
-sudo vi /home/$username/.ssh/authorized_keys
-sudo chown -R $username\: /home/$username/.ssh/
-sudo chmod 700 /home/$username/.ssh
-sudo chmod -R 600 /home/$username/.ssh/authorized_keys
-"""
+    # TODO Copy /../etc/skel to /../home/username
+
+    with (settings(warn_only=True)):
+        with cd(home_dir):
+            sudo('mkdir -p .ssh')
+            files.append('.ssh/authorized_keys', ssh_key, use_sudo=True)
+
+            sudo('chown -R %s:%s %s' % (UID, UID, home_dir))
+            sudo('chmod 700 .ssh')
+            sudo('chmod -R 600 .ssh/authorized_keys')
+
+        line = '%s ALL=(ALL) NOPASSWD: ALL' % username
+        files.append('%s/etc/sudoers' % mount_point, line, use_sudo=True)
+
+    # Clean up
+    sudo('rm -rf /home/%s/adduser.py' % host_username)
+    sudo('rm -f /tmp/adduser.msg')
+
+    return
