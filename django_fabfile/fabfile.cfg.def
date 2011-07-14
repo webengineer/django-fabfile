@@ -25,3 +25,4 @@ yearly_backups = 10
 [us-east-1]
 key_pair = regional-username
 key_filename = /home/username/.ssh/regional_username_rsa
+username = electedm
