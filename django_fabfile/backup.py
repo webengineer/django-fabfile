@@ -789,7 +789,12 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
     put(dst_key_file, '.ssh/', mirror_local_mode=True)
     dst_key_filename = _split(dst_key_file)[1]
     cmd = ('rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no" '
-           '-a --delete {src_mnt}/ root@{rhost}:{dst_mnt}')
+           '-aHAXzP --delete --exclude /root/.bash_history '
+           '--exclude /home/*/.bash_history --exclude /etc/ssh/ssh_host_* '
+           '--exclude /etc/ssh/moduli '
+           '--exclude /etc/udev/rules.d/*persistent-net.rules '
+           '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
+           '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
     sudo(cmd.format(rhost=dst_inst.public_dns_name, key_file=dst_key_filename,
                     src_mnt=src_mnt, dst_mnt=dst_mnt))
     env.update({'host_string': dst_inst.public_dns_name,
