@@ -1,3 +1,9 @@
+Version 2011.07.16.1
+--------------------
+
+Enabled volume deletion after termination for AMI, created by
+`django_fabfile.backup.create_ami`.
+
 Version 2011.06.28.1
 --------------------
 

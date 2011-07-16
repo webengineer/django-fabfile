@@ -966,6 +966,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     # setup for building an EBS boot snapshot"
     ebs = _EBSBlockDeviceType()
     ebs.snapshot_id = snap_id
+    ebs.delete_on_termination = True
     block_map = _BlockDeviceMapping()
     block_map[root_dev] = ebs
 
