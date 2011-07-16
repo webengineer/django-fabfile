@@ -711,6 +711,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     _wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
+    """Add disk label for normal boot on created volume"""
+    sudo('e2label {dev} uec-rootfs'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
     if mkfs:
         sudo('chown -R {user}:{user} {mnt}'.format(user=username,
@@ -913,7 +915,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             print _format_exc()
 
 
-def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+def launch_instance_from_ami(region_name, ami_id, inst_type=None,architecture=None):
     """Create instance from specified AMI.
 
     region_name
@@ -934,7 +936,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         key_name = config.get(conn.region.name, 'key_pair'),
         security_groups = [_security_groups, ],
         instance_type = inst_type,
-        kernel_id=_get_latest_aki(conn, image.architecture).id)
+        #Kernel workaround, not tested with natty
+        kernel_id=config.get(region_name, 'kernel'+architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)
@@ -988,7 +991,8 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        launch_instance_from_ami(region, image.id, inst_type=inst_type)
+        launch_instance_from_ami(region, image.id, inst_type=inst_type, 
+                                            architecture=architecture)
 
 
 def modify_kernel(region, instance_id):
