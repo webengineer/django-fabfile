@@ -1,3 +1,9 @@
+Version 2011.07.17.1
+--------------------
+
+Added workaround with kernels for AMI creation to fix problems at instance boot
+stage.
+
 Version 2011.07.16.2
 --------------------
 

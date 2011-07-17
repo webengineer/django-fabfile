@@ -15,7 +15,6 @@ from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
-from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
@@ -51,7 +50,6 @@ debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('DEFAULT', 'username')
 ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
 architecture = config.get('DEFAULT', 'architecture')
-aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
 ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
 ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
 ami_ptrn_with_release_date = config.get('DEFAULT',
@@ -206,15 +204,6 @@ def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
-
-
-def _get_latest_aki(conn, architecture):
-    kernels = conn.get_all_images(filters={
-        'image-type': 'kernel',
-        'architecture': architecture,
-        'owner-id': ubuntu_aws_account,
-        'name': aki_ptrn})
-    return sorted(kernels, key=_attrgetter('name'))[-1]
 
 
 def _get_region_by_name(region_name):
@@ -915,7 +904,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             print _format_exc()
 
 
-def launch_instance_from_ami(region_name, ami_id, inst_type=None,architecture=None):
+def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     """Create instance from specified AMI.
 
     region_name
@@ -937,7 +926,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None,architecture=No
         security_groups = [_security_groups, ],
         instance_type = inst_type,
         #Kernel workaround, not tested with natty
-        kernel_id=config.get(region_name, 'kernel'+architecture))
+        kernel_id=config.get(region_name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)
@@ -991,8 +980,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        launch_instance_from_ami(region, image.id, inst_type=inst_type, 
-                                            architecture=architecture)
+        launch_instance_from_ami(region, image.id, inst_type=inst_type)
 
 
 def modify_kernel(region, instance_id):

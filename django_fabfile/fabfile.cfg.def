@@ -1,5 +1,4 @@
 [DEFAULT]
-aki_ptrn = ^ubuntu-kernels/ubuntu-lucid*
 ami_ptrn = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
