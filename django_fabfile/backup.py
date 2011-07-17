@@ -926,7 +926,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         security_groups = [_security_groups, ],
         instance_type = inst_type,
         #Kernel workaround, not tested with natty
-        kernel_id=config.get(region_name, 'kernel' + image.architecture))
+        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)

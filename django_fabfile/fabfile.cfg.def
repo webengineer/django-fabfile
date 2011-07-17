@@ -26,7 +26,6 @@ kernelx86_64 = aki-427d952b
 kerneli386 = aki-407d9529
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
-username = electedm
 
 [us-west-1]
 kernelx86_64 = aki-9ba0f1de
