@@ -544,7 +544,7 @@ def trim_snapshots(region_name=None, dry_run=False):
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
-        _trim_snapshots(region=reg)
+        _trim_snapshots(reg)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
