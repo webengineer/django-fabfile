@@ -15,7 +15,6 @@ from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
-from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
@@ -46,7 +45,6 @@ debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('DEFAULT', 'username')
 ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
 architecture = config.get('DEFAULT', 'architecture')
-aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
 ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
 ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
 ami_ptrn_with_release_date = config.get('DEFAULT',
@@ -201,15 +199,6 @@ def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
-
-
-def _get_latest_aki(conn, architecture):
-    kernels = conn.get_all_images(filters={
-        'image-type': 'kernel',
-        'architecture': architecture,
-        'owner-id': ubuntu_aws_account,
-        'name': aki_ptrn})
-    return sorted(kernels, key=_attrgetter('name'))[-1]
 
 
 def _get_region_by_name(region_name):
@@ -707,6 +696,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     _wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
+    """Add disk label for normal boot on created volume"""
+    sudo('e2label {dev} uec-rootfs'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
     if mkfs:
         sudo('chown -R {user}:{user} {mnt}'.format(user=username,
@@ -930,7 +921,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         key_name = config.get(conn.region.name, 'key_pair'),
         security_groups = [_security_groups, ],
         instance_type = inst_type,
-        kernel_id=_get_latest_aki(conn, image.architecture).id)
+        #Kernel workaround, not tested with natty
+        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)
