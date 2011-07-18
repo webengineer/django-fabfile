@@ -42,3 +42,7 @@ kerneli386 = aki-4deec439
 [ap-northeast-1]
 kernelx86_64 = aki-d409a2d5
 kerneli386 = aki-d209a2d3
+
+[RDBMS]
+primary = 50.19.234.247
+secondary = 46.137.188.195
