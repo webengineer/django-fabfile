@@ -40,11 +40,6 @@ from fabric.api import env, prompt, put, sudo
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
-for reg in _regions():
-    if not config.has_section(reg.name):
-        config.add_section(reg.name)
-        with open(config_file, 'w') as f_p:
-            config.write(f_p)
 
 debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('DEFAULT', 'username')
@@ -549,6 +544,7 @@ def trim_snapshots(region_name=None, dry_run=False):
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
         print reg
+        _trim_snapshots(region=reg)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
