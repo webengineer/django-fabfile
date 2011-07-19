@@ -1,23 +1,16 @@
 from fabric.api import env, sudo, settings
 from ConfigParser import ConfigParser as _ConfigParser
 
-try:
-    config_file = 'fabfile.cfg'
-    config = _ConfigParser()
-    config.read(config_file)
-    master = config.get('RDBMS', 'master')
-    backup = config.get('RDBMS', 'backup')
-    username = config.get('DEFAULT', 'username')
-    pcp_password = config.get('RDBMS', 'pcp_password')
-except:
-    print 'Not enough data in fabfile.ini, please fill all values in [RDBMS]'
-    print 'Thanks!'
-    master = None
-    backup = None
-    username = None
 
-if username:
-    env.update({'disable_known_hosts': True, 'user': username})
+config_file = 'fabfile.cfg'
+config = _ConfigParser()
+config.read(config_file)
+master = config.get('RDBMS', 'master')
+backup = config.get('RDBMS', 'backup')
+username = config.get('DEFAULT', 'username')
+pcp_password = config.get('RDBMS', 'pcp_password')
+
+env.update({'disable_known_hosts': True, 'user': username})
 
 
 def _return(master, backup, node_id):
