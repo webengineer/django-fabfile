@@ -1,108 +1,122 @@
-from fabric.api import env, sudo
+from fabric.api import env, sudo, settings
 from ConfigParser import ConfigParser as _ConfigParser
 
 try:
     config_file = 'fabfile.cfg'
     config = _ConfigParser()
     config.read(config_file)
-    primary = config.get('RDBMS', 'primary')
-    secondary = config.get('RDBMS', 'secondary')
+    master = config.get('RDBMS', 'master')
+    backup = config.get('RDBMS', 'backup')
     username = config.get('DEFAULT', 'username')
+    pcp_password = config.get('RDBMS', 'pcp_password')
 except:
-    primary = None
-    secondary = None
+    print 'Not enough data in fabfile.ini, please fill all values in [RDBMS]'
+    print 'Thanks!'
+    master = None
+    backup = None
     username = None
 
 if username:
     env.update({'disable_known_hosts': True, 'user': username})
 
 
-def _return(primary, secondary, node_id):
-    env.update({'host_string': primary})
-    sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=node_id))
-    env.update({'host_string': secondary})
-    sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=node_id))
+def _return(master, backup, node_id):
+    with settings(host_string=master, warn_only=True):
+        sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=node_id,
+                                                    pcp_password=pcp_password))
+    with settings(host_string=backup, warn_only=True):
+        sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=node_id,
+                                                    pcp_password=pcp_password))
 
 
 def _failover(new_master_host_name, old_master_node, failed_node_id,
                                                     master_node_id):
     trigger = '/var/log/pgpool/trigger/trigger_file1'
-    env.update({'host_string': new_master_host_name})
-    sudo('su postgres -c "touch {trigger}"'.format(trigger=trigger))
-    sudo('su postgres -c "/usr/local/etc/dnsmadeeasy-update.sh {new_master}"'
-                                .format(new_master=new_master_host_name))
-    sudo('su postgres -c "pcp_detach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=failed_node_id))
-    sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=master_node_id))
-    env.update({'host_string': old_master_node})
-    sudo('su postgres -c "pcp_detach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=failed_node_id))
-    sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=master_node_id))
+    with settings(host_string=new_master_host_name, warn_only=True):
+        sudo('su postgres -c "touch {trigger}"'.format(trigger=trigger))
+        sudo('su postgres -c "/usr/local/etc/dnsmadeeasy-update.sh'
+                      ' {new_master}"'.format(new_master=new_master_host_name))
+        sudo('su postgres -c "pcp_detach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=failed_node_id,
+                                                    pcp_password=pcp_password))
+        sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=master_node_id,
+                                                    pcp_password=pcp_password))
+    with settings(host_string=old_master_node, warn_only=True):
+        sudo('su postgres -c "pcp_detach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=failed_node_id,
+                                                    pcp_password=pcp_password))
+        sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=master_node_id,
+                                                    pcp_password=pcp_password))
 
 
-def _recover(master, standby, recover_node_id):
-    if master:
-        env.update({'host_string': master})
-    out = sudo('/etc/init.d/postgresql status | grep -c Running')
-    if out == '1':
-        sudo('/etc/init.d/postgresql stop')
-    if standby:
-        env.update({'host_string': standby})
-    sudo('su postgres -c "pcp_recovery_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=recover_node_id))
-    if master:
-        env.update({'host_string': master})
-    sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
-          ' GKQUAzldPbsWsweC {node_id}"'.format(node_id=recover_node_id))
+def _recover(primary, standby, recover_node_id):
+    with settings(host_string=primary, warn_only=True):
+        out = sudo('/etc/init.d/postgresql status | grep -c Running')
+        if out == '1':
+            sudo('/etc/init.d/postgresql stop')
+    with settings(host_string=standby, warn_only=True):
+        sudo('su postgres -c "pcp_recovery_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=recover_node_id,
+                                                    pcp_password=pcp_password))
+    with settings(host_string=primary, warn_only=True):
+        sudo('su postgres -c "pcp_attach_node 60 127.0.0.1 9898 postgres'
+          ' {pcp_password} {node_id}"'.format(node_id=recover_node_id,
+                                                    pcp_password=pcp_password))
 
 
-def switch_to_secondary():
+def switch_to_backup():
     """
-    If primary server failed, run this to promote secondary server
+    If master server failed, run this to promote backup server
     from slave to master-role and detach failed node from pgpool
     """
-    _failover(secondary, primary, 0, 1)
+    if master != None and backup != None:
+        _failover(backup, master, 0, 1)
 
 
-def recover_primary():
+def recover_master():
     """
-    Run this to start recovery of failing primary node
-    (run this strictly after switching_to_secondary)
+    Run this to start recovery of failing master node
+    (run this strictly after switching_to_backup)
     """
-    _recover(primary, secondary, 0)
+    if master != None and backup != None:
+        _recover(master, backup, 0)
 
 
-def return_primary():
+def return_master():
     """
     Run this after temporary network issues in us-east-1
-    It will reattach primary node to pgpool server
+    It will reattach master node to pgpool server
     """
-    _return(primary, secondary, 0)
+    if master != None and backup != None:
+        _return(master, backup, 0)
 
 
-def switch_to_primary():
+def switch_to_master():
     """
-    If secondary server failed, run this to promote primary server
+    If backup server failed, run this to promote master server
     from slave to master-role and detach failed node from pgpool
     """
-    _failover(primary, secondary, 1, 0)
+    if master != None and backup != None:
+        _failover(master, backup, 1, 0)
 
 
-def recover_secondary():
+def recover_backup():
     """
-    Run this to start recovery of failing secondary node
-    (run this strictly after switching_to_primary)
+    Run this to start recovery of failing backup node
+    (run this strictly after switching_to_master)
     """
-    _recover(secondary, primary, 1)
+    if master != None and backup != None:
+        _recover(backup, master, 1)
 
 
-def return_secondary():
+def return_backup():
     """
     Run this after temporary network issues in eu-west-1
-    It will reattach secondary node to pgpool server
+    It will reattach backup node to pgpool server
     """
-    _return(primary, secondary, 1)
+    if master != None and backup != None:
+        _return(master, backup, 1)
