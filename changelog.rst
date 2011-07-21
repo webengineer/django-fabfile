@@ -1,3 +1,9 @@
+Version 2011.07.21.1
+--------------------
+
+Added `django_fabfile.switchdb` module with commands for switching current
+primary DB server.
+
 Version 2011.07.18.1
 --------------------
 
