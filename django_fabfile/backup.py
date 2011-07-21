@@ -66,31 +66,22 @@ ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
 
 env.update({'disable_known_hosts': True, 'user': username})
 
-
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
-def _print_dbg(text):
-    """
-    Logging process
-    """
-    if debug:
-        LOG_FILENAME = 'log_rotating_file.out'
+# Set up a specific logger with our desired output level
+LOG_FILENAME = 'log_rotating_file.out'
+logger = logging.getLogger('Logger')
 
-        # Set up a specific logger with our desired output level
-        my_logger = logging.getLogger('MyLogger')
-        my_logger.setLevel(logging.DEBUG)
+if debug:
+    logger.setLevel(logging.DEBUG)
+else:
+    logger.setLevel(logging.INFO)
 
-        # Add the log message handler to the logger
-        handler = logging.handlers.RotatingFileHandler(
-            LOG_FILENAME, maxBytes=512000, backupCount=30)
-
-        my_logger.addHandler(handler)
-        my_logger.debug('DEBUG: {0}'.format(text))
-
-        print 'DEBUG: {0}'.format(text)
-
-    return
+# Add the log message handler to the logger
+handler = logging.handlers.RotatingFileHandler(
+    LOG_FILENAME, maxBytes=512000, backupCount=30)
+logger.addHandler(handler)
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -134,7 +125,7 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
             attr = getattr(attr, attr_name)
         return attr
     sleep_for = 3
-    _print_dbg('Calling {0} updates'.format(obj))
+    logger.debug('DEBUG: Calling {0} updates'.format(obj))
     for i in range(10):     # Resource may be reported as "not exists"
         try:                # right after creation.
             getattr(obj, update_attr)()
@@ -143,22 +134,24 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         else:
             break
     getattr(obj, update_attr)()
-    _print_dbg('Called {0} update'.format(obj))
+    logger.debug('DEBUG: Called {0} update'.format(obj))
     obj_state = get_nested_attr(obj, attrs)
     obj_region = getattr(obj, 'region', None)
-    _print_dbg('State fetched from {0} in {1}'.format(obj, obj_region))
+    logger.debug('DEBUG: State fetched from {0} in {1}'
+        .format(obj, obj_region))
     if obj_state != state:
         if obj_region:
             info = 'Waiting for the {obj} in {obj.region} to be {state}...'
         else:
             info = 'Waiting for the {obj} to be {state}...'
-        print info.format(obj=obj, state=state)
+        logger.info('INFO: %s' % info.format(obj=obj, state=state))
         while get_nested_attr(obj, attrs) != state:
-            print 'still {0}...'.format(get_nested_attr(obj, attrs))
+            logger.info('INFO: still {0}...'
+                .format(get_nested_attr(obj, attrs)))
             sleep_for += 5
             _sleep(min(sleep_for, max_sleep))
             getattr(obj, update_attr)()
-        print 'done.'
+        logger.info('INFO: done.')
 
 
 class _WaitForProper(object):
@@ -168,7 +161,7 @@ class _WaitForProper(object):
     >>> @_WaitForProper(attempts=3, pause=5)
     ... def test():
     ...     1 / 0
-    ... 
+    ...
     >>> test()
     ZeroDivisionError('integer division or modulo by zero',)
      waiting next 5 sec (2 times left)
@@ -190,10 +183,15 @@ class _WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    print _format_exc() if debug else repr(err)
+                    if debug:
+                        logger.debug('DEBUG: %s' % _format_exc())
+                    else:
+                        logger.info('INFO: %s' % repr(err))
+
                     if attempts > 0:
                         msg = ' waiting next {0} sec ({1} times left)'
-                        print msg.format(self.pause, attempts)
+                        logger.info('INFO: %s' %
+                            msg.format(self.pause, attempts)
                         _sleep(self.pause)
                 else:
                     break
@@ -307,7 +305,7 @@ def _select_snapshot():
         if snap_id in _get_all_snapshots(region_name, id_only=True):
             return region_name, snap_id
         else:
-            print 'No snapshot with provided ID found'
+            logger.info('INFO: No snapshot with provided ID found')
 
     instances_list = list(_get_all_instances(region_name))
     instances = dict((inst.id, {
@@ -372,8 +370,8 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     conn = region.connect()
     snapshot = conn.create_snapshot(vol_id, description)
     _clone_tags(instance, snapshot)
-    print '{0} initiated from Volume:{1} of {2}'.format(snapshot, vol_id,
-                                                        instance)
+    logger.info('INFO: {0} initiated from Volume:{1} of {2}'
+        .format(snapshot, vol_id, instance))
     if synchronously:
         _wait_for(snapshot, ['status', ], 'completed')
     return snapshot
@@ -443,7 +441,7 @@ def _trim_snapshots(region_name, dry_run=False):
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
     last_sunday = datetime(now.year, now.month,
-          now.day) - _timedelta(days = (now.weekday() + 1) % 7)
+          now.day) - _timedelta(days=(now.weekday() + 1) % 7)
     last_month = datetime(now.year, now.month -1, now.day)
     last_year = datetime(now.year-1, now.month, now.day)
     other_years = datetime(now.year-2, now.month, now.day)
@@ -454,25 +452,25 @@ def _trim_snapshots(region_name, dry_run=False):
     oldest_snapshot_date = datetime(2000, 1, 1)
 
     for hour in range(0, hourly_backups):
-        target_backup_times.append(last_hour - _timedelta(hours = hour))
+        target_backup_times.append(last_hour - _timedelta(hours=hour))
 
     for day in range(0, daily_backups):
-        target_backup_times.append(last_midnight - _timedelta(days = day))
+        target_backup_times.append(last_midnight - _timedelta(days=day))
 
     for week in range(0, weekly_backups):
-        target_backup_times.append(last_sunday - _timedelta(weeks = week))
+        target_backup_times.append(last_sunday - _timedelta(weeks=week))
 
     for month in range(0, monthly_backups):
-        target_backup_times.append(last_month- _timedelta(weeks= month*4))
+        target_backup_times.append(last_month - _timedelta(weeks=month * 4))
 
     for quart in range(0, quarterly_backups):
-        target_backup_times.append(last_year- _timedelta(weeks= quart*16))
+        target_backup_times.append(last_year - _timedelta(weeks=quart * 16))
 
     for year in range(0, yearly_backups):
-        target_backup_times.append(other_years- _timedelta(days = year*365))
+        target_backup_times.append(other_years - _timedelta(days=year * 365))
 
 
-    one_day = _timedelta(days = 1)
+    one_day = _timedelta(days=1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
         target_backup_times.append(start_of_month)
@@ -495,9 +493,9 @@ def _trim_snapshots(region_name, dry_run=False):
 
     # get all the snapshots, sort them by date and time,
     #and organize them into one array for each volume:
-    all_snapshots = conn.get_all_snapshots(owner = 'self')
+    all_snapshots = conn.get_all_snapshots(owner='self')
     # oldest first
-    all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time))
+    all_snapshots.sort(cmp=lambda x, y: cmp(x.start_time, y.start_time))
 
     snaps_for_each_volume = {}
     for snap in all_snapshots:
@@ -544,18 +542,19 @@ def _trim_snapshots(region_name, dry_run=False):
                     if snap_found_for_this_time_period:
                         if not snap.tags.get('preserve_snapshot'):
                             if dry_run:
-                                print('Dry-trimmed %s %s from %s' % (snap,
-                                    snap.description, snap.start_time))
+                                logger.info('INFO: Dry-trimmed %s %s from %s' %
+                                    (snap, snap.description, snap.start_time))
                             else:
                                 # as long as the snapshot wasn't marked with
                                 # the 'preserve_snapshot' tag, delete it:
                                 try:
                                     conn.delete_snapshot(snap.id)
                                 except _EC2ResponseError as err:
-                                    print str(err)
+                                    logger.info('INFO: %s' % str(err))
                                 else:
-                                    print('Trimmed %s %s from %s' % (snap,
-                                        snap.description, snap.start_time))
+                                    logger.info('INFO: Trimmed %s %s from %s' %
+                                        (snap, snap.description,
+                                        snap.start_time))
                        # go on and look at the next snapshot,
                        # leaving the time period alone
                     else:
@@ -580,7 +579,7 @@ def trim_snapshots(region_name=None, dry_run=False):
     region = _get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
-        print reg
+        logger.info('INFO: %s' % reg)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
@@ -602,7 +601,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     region = _get_region_by_name(region_name)
     conn = region.connect()
 
-    filters={'owner_id': ubuntu_aws_account, 'architecture': architecture,
+    filters = {'owner_id': ubuntu_aws_account, 'architecture': architecture,
              'name': ami_ptrn, 'image_type': 'machine',
              'root_device_type': 'ebs'}
     images = conn.get_all_images(filters=filters)
@@ -626,8 +625,8 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
     zone = zone_name or conn.get_all_zones()[-1].name
-    print 'Launching new instance in {zone} using {image}'.format(image=image,
-                                                                 zone=zone)
+    logger.info('INFO: Launching new instance in {zone} using {image}'
+        .format(image=image, zone=zone))
 
     key_pair = key_pair or config.get(region.name, 'key_pair')
     reservation = image.run(key_name=key_pair, instance_type='t1.micro',
@@ -635,7 +634,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     assert len(reservation.instances) == 1, 'More than 1 instances created'
     inst = reservation.instances[0]
     _wait_for(inst, ['state', ], 'running')
-    print '{inst} created in {zone}'.format(inst=inst, zone=zone)
+    logger.info('INFO: {inst} created in {zone}'.format(inst=inst, zone=zone))
 
     return inst
 
@@ -648,7 +647,7 @@ def _create_temp_inst(zone, key_pair=None, security_groups=None):
     try:
         yield inst
     finally:
-        print 'Terminating the {0} in {0.region}...'.format(inst)
+        logger.info('INFO: Terminating the {0} in {0.region}...'.format(inst))
         inst.terminate()
         _wait_for(inst, ['state'], 'terminated')
 
@@ -670,24 +669,31 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
         try:
             volume = conn.create_volume(snap.volume_size, zone, snap)
             _clone_tags(snap, volume)
-            _print_dbg('Tags cloned from {0} to {1}'.format(snap, volume))
+            logger.debug('DEBUG: Tags cloned from {0} to {1}'
+                .format(snap, volume))
             try:
                 with _create_temp_inst(
                     zone, key_pair=key_pair, security_groups=security_groups) \
                     as inst:
                     dev_name = _get_avail_dev(inst)
-                    _print_dbg('Got avail {0} from {1}'.format(dev_name, inst))
+                    logger.debug('DEBUG: Got avail {0} from {1}'
+                        .format(dev_name, inst))
                     volume.attach(inst.id, dev_name)
-                    _print_dbg('Attached {0} to {1}'.format(volume, inst))
+                    logger.debug('DEBUG: Attached {0} to {1}'
+                        .format(volume, inst))
                     volume.update()
                     _wait_for(volume, ['attach_data', 'status'], 'attached')
                     yield volume
             finally:
                 _wait_for(volume, ['status', ], 'available')
-                print 'Deleting {vol} in {vol.region}...'.format(vol=volume)
+                logger.info('INFO: Deleting {vol} in {vol.region}...'
+                    .format(vol=volume))
                 volume.delete()
         except _BotoServerError as err:
-            print _format_exc() if debug else '{0} in {1}'.format(err, zone)
+            if debug:
+                logging.info('DEBUG: %s' % _format_exc())
+            else:
+                logging.info('INFO: {0} in {1}'.format(err, zone))
             continue
         else:
             break
@@ -704,7 +710,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
-    _print_dbg(_PrettyPrinter().pformat(env))
+    logger.debug('DEBUG: %s' % _PrettyPrinter().pformat(env))
     inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
@@ -785,9 +791,9 @@ def mount_snapshot(region_name=None, snap_id=None):
                      'altered by system.')
         key_file = config.get(region.name, 'key_filename')
         inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
-        print info.format(
+        logger.info('INFO: %s' % info.format(
             inst=inst, user=username, key=key_file,
-            device=vol.attach_data.device, mountpoint=mountpoint)
+            device=vol.attach_data.device, mountpoint=mountpoint))
 
         info = ('\nEnter FINISHED if you are finished looking at the '
                 'backup and would like to cleanup: ')
@@ -859,8 +865,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
     if src_snap.tags.get('Name'):
         info += ' of {name}'
     info += ' from {src} to {dst}'
-    print info.format(snap=src_snap, src=src_conn.region, dst=dst_conn.region,
-                      name=src_snap.tags.get('Name'))
+    logger.info('INFO: %s' % info.format(snap=src_snap, src=src_conn.region,
+        dst=dst_conn.region, name=src_snap.tags.get('Name')))
 
     snaps = dst_conn.get_all_snapshots(owner='self')
     src_vol = _get_snap_vol(src_snap)
@@ -870,7 +876,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
 
     if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
         info = ' {src} is not newer than {dst} {dst.description} in {dst_reg}'
-        print info.format(src=src_snap, dst=dst_snap, dst_reg=dst_reg)
+        logger.info('INFO: %s' % info.format(src=src_snap, dst=dst_snap,
+            dst_reg=dst_reg))
         return
 
     with _config_temp_ssh(dst_conn) as key_file:
@@ -926,7 +933,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         try:
             rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
         except:
-            print _format_exc()
+            logger.info('INFO: %s' % _format_exc())
 
 
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
@@ -947,9 +954,9 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         'Select security group')
     _wait_for(image, ['state'], 'available')
     reservation = image.run(
-        key_name = config.get(conn.region.name, 'key_pair'),
-        security_groups = [_security_groups, ],
-        instance_type = inst_type,
+        key_name=config.get(conn.region.name, 'key_pair'),
+        security_groups=[_security_groups, ],
+        instance_type=inst_type,
         kernel_id=_get_latest_aki(conn, image.architecture).id)
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
@@ -958,7 +965,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
     key_file = config.get(conn.region.name, 'key_filename')
-    print info.format(inst=new_instance, user=username, key=key_file)
+    logger.info('INFO: %s' % info.format(inst=new_instance, user=username,
+        key=key_file))
 
 
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
@@ -991,14 +999,14 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     # create the new AMI all options from snap JSON description:
     result = conn.register_image(
         name=name,
-        description = snap.description,
-        architecture = _get_descr_attr(snap, 'Arch') or inst_arch,
-        root_device_name = _get_descr_attr(snap, 'Root_dev_name') or root_dev,
-        block_device_map = block_map)
+        description=snap.description,
+        architecture=_get_descr_attr(snap, 'Arch') or inst_arch,
+        root_device_name=_get_descr_attr(snap, 'Root_dev_name') or root_dev,
+        block_device_map=block_map)
     image = conn.get_all_images(image_ids=[result, ])[0]
     _clone_tags(snap, image)
 
-    print 'The new AMI ID = ', result
+    logger.info('INFO: The new AMI ID = %s', result)
 
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
