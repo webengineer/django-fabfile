@@ -1,0 +1,106 @@
+#!/bin/sh
+###############################################################################
+# This script is used as an initramfs-tools hook to update a /boot directory. #
+# See initramfs-tools(8) and update-initramfs(8) for more information.        #
+#                                                                             #
+###############################################################################
+#                                                                             #
+# Copyright (c) 2011 Henrik Gulbrandsen <henrik@gulbra.net>                   #
+#                                                                             #
+# This software is provided 'as-is', without any express or implied warranty. #
+# In no event will the authors be held liable for any damages arising from    #
+# the use of this software.                                                   #
+#                                                                             #
+# Permission is granted to anyone to use this software for any purpose,       #
+# including commercial applications, and to alter it and redistribute it      #
+# freely, subject to the following restrictions:                              #
+#                                                                             #
+# 1. The origin of this software must not be misrepresented; you must not     #
+#    claim that you wrote the original software. If you use this software     #
+#    in a product, an acknowledgment in the product documentation would be    #
+#    appreciated but is not required.                                         #
+#                                                                             #
+# 2. Altered source versions must be plainly marked as such, and must not be  #
+#    misrepresented as being the original software.                           #
+#                                                                             #
+# 3. This notice may not be removed or altered from any source distribution,  #
+#    except that more "Copyright (c)" lines may be added to already existing  #
+#    "Copyright (c)" lines if you have modified the software and wish to make #
+#    your changes available under the same license as the original software.  #
+#                                                                             #
+###############################################################################
+
+set -e
+
+### Standard Hook Header ######################################################
+
+PREREQ="cryptroot"
+
+prereqs() {
+    echo "$PREREQ";
+}
+
+case $1 in
+  prereqs) prereqs; exit 0;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+### Data Copying ##############################################################
+
+boot=$(cd `dirname $0`/../boot; pwd)
+lib="/lib"
+
+# Copy the SSL certificate and private key
+mkdir -p "${DESTDIR}/etc/ssl/certs"
+cp "$boot/boot.crt" "${DESTDIR}/etc/ssl/certs/"
+mkdir -p "${DESTDIR}/etc/ssl/private"
+cp "$boot/boot.key" "${DESTDIR}/etc/ssl/private/"
+
+# Construct the bozo dir and add our fake cryptsetup
+/bin/sh "$boot/make_bozo_dir.sh" "${DESTDIR}/bozo"
+mv "${DESTDIR}/sbin/cryptsetup" "${DESTDIR}/sbin/cs"
+cp "$boot/cryptsetup.sh" "${DESTDIR}/sbin/cryptsetup"
+
+# Use a fake keyscript; bozohttpd will get the real password
+touch "${DESTDIR}/sbin/cryptkey"; chmod a+x "${DESTDIR}/sbin/cryptkey"
+echo "source=/dev/sda2 keyscript=/sbin/cryptkey" \
+    >> "${DESTDIR}/conf/conf.d/cryptroot"
+
+# Copy commands to start and stop bozohttpd
+copy_exec "$boot/bozohttpd" "/sbin"
+copy_exec "$(which killall)" "/bin"
+
+# Add devices for bozohttp
+mkdir -p "${DESTDIR}/dev/"
+cp -a /dev/null "${DESTDIR}/dev/"
+cp -a /dev/urandom "${DESTDIR}/dev/"
+
+# Guess where the NSS libraries are located
+file -L "$boot/bozohttpd" | grep -q 32-bit && lib="/lib/i386-linux-gnu"
+file -L "$boot/bozohttpd" | grep -q 64-bit && lib="/lib/x86_64-linux-gnu"
+if ls $lib/libnss_compat.so.* > /dev/null 2>&1; then
+    mkdir -p "${DESTDIR}${lib}"
+else
+    lib="/lib"
+fi
+
+# Copy extra libraries needed by bozohttpd
+cp $lib/libnss_compat.so.* "${DESTDIR}${lib}/"
+cp $lib/libnss_files.so.* "${DESTDIR}${lib}/"
+cp $lib/libnsl.so.* "${DESTDIR}${lib}/"
+
+# Create a minimal /etc/nsswitch.conf
+cat >> "${DESTDIR}/etc/nsswitch.conf" <<EOT
+# Needed for bozohttpd
+passwd:     compat
+group:      compat
+services:   files
+EOT
+
+# Copy the relevant parts of /etc/passwd, /etc/group, and /etc/services
+grep www-data /etc/passwd >> "${DESTDIR}/etc/passwd"
+grep www-data /etc/group >> "${DESTDIR}/etc/group"
+grep https /etc/services >> "${DESTDIR}/etc/services"
+
+###############################################################################

@@ -1,0 +1,39 @@
+###############################################################################
+#                                                                             #
+# Generate a 25-year certificate for your internal Certification Authority:   #
+openssl genrsa -des3 -out ca.key 4096
+#!!!ALWAYS ADD COMMON NAME ON KEY CREATION (i.e. *.amazonaws.com)!!!
+openssl req -new -x509 -days 9131 -set_serial 00 -key ca.key -out ca.crt
+#                                                                             #
+# Generate a Certificate Signing Request for the server:                      #
+openssl genrsa -des3 -out private.key 4096
+#!!!ALWAYS ADD COMMON NAME ON KEY CREATION (i.e. *.amazonaws.com)!!!
+openssl req -new -key private.key -out boot.csr
+#                                                                             #
+# Generate a 10-year server certificate from the Certificate Signing Request: #
+openssl x509 -req -days 3652 -set_serial 01 -CA ca.crt -CAkey ca.key -in boot.csr -out boot.crt
+#                                                                             #
+# To decode the server key before installing on the server machine:           #
+openssl rsa -in private.key -out boot.key
+#                                                                             #
+# Encrypt all keys with a password that you will remember. You may be able to #
+# import the CA certificate into your web browser. In that case, all future   #
+# server certificates you may generate will be automatically accepted without #
+# annoying warnings. Just remember that the serial number must be increased   #
+# for each certificate you generate. For reference, the certificate import    #
+# function of my Firefox browser is hidden under Preferences -> Advanced ->   #
+# Encryption -> View Certificates -> Authorities -> Import...                 #
+#                                                                             #
+# Example field values; the remaining fields may be left blank.               #
+#                                                                             #
+#     Certification Authority:                                                #
+#       CN: Example CA                                                        #
+#       O:  Example Company                                                   #
+#       OU: Certificate Division                                              #
+#                                                                             #
+#     Web Server:                                                             #
+#       CN: boot.example.com                                                  #
+#       O:  Example Company                                                   #
+#       OU: Web Division                                                      #
+#                                                                             #
+###############################################################################

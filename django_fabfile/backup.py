@@ -34,7 +34,7 @@ from boto.ec2.blockdevicemapping import (
     EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, prompt, put, sudo
+from fabric.api import env, prompt, put, sudo, settings
 
 
 config_file = 'fabfile.cfg'
@@ -76,10 +76,8 @@ def _prompt_to_select(choices, query='Select from', paging=False):
     while keys.count(None):
         keys.pop(choices.index(None))    # Remove empty values.
     assert len(keys), 'No choices provided'
-
     if len(keys) == 1:
         return keys[0]
-
     picked = None
     while not picked in keys:
         if paging:
@@ -99,7 +97,6 @@ def _wait_for(obj, attrs, state, update_attr='update', max_sleep=30):
         list of nested attribute names;
     update_attr
         will be called to refresh state."""
-
     def get_nested_attr(obj, attrs):
         attr = obj
         for attr_name in attrs:
@@ -140,7 +137,7 @@ class _WaitForProper(object):
     >>> @_WaitForProper(attempts=3, pause=5)
     ... def test():
     ...     1 / 0
-    ... 
+    ...
     >>> test()
     ZeroDivisionError('integer division or modulo by zero',)
      waiting next 5 sec (2 times left)
@@ -406,10 +403,10 @@ def _trim_snapshots(region_name, dry_run=False):
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
     last_sunday = datetime(now.year, now.month,
-          now.day) - _timedelta(days = (now.weekday() + 1) % 7)
-    last_month = datetime(now.year, now.month -1, now.day)
-    last_year = datetime(now.year-1, now.month, now.day)
-    other_years = datetime(now.year-2, now.month, now.day)
+          now.day) - _timedelta(days=(now.weekday() + 1) % 7)
+    last_month = datetime(now.year, now.month - 1, now.day)
+    last_year = datetime(now.year - 1, now.month, now.day)
+    other_years = datetime(now.year - 2, now.month, now.day)
     start_of_month = datetime(now.year, now.month, 1)
 
     target_backup_times = []
@@ -417,25 +414,24 @@ def _trim_snapshots(region_name, dry_run=False):
     oldest_snapshot_date = datetime(2000, 1, 1)
 
     for hour in range(0, hourly_backups):
-        target_backup_times.append(last_hour - _timedelta(hours = hour))
+        target_backup_times.append(last_hour - _timedelta(hours=hour))
 
     for day in range(0, daily_backups):
-        target_backup_times.append(last_midnight - _timedelta(days = day))
+        target_backup_times.append(last_midnight - _timedelta(days=day))
 
     for week in range(0, weekly_backups):
-        target_backup_times.append(last_sunday - _timedelta(weeks = week))
+        target_backup_times.append(last_sunday - _timedelta(weeks=week))
 
     for month in range(0, monthly_backups):
-        target_backup_times.append(last_month- _timedelta(weeks= month*4))
+        target_backup_times.append(last_month - _timedelta(weeks=month * 4))
 
     for quart in range(0, quarterly_backups):
-        target_backup_times.append(last_year- _timedelta(weeks= quart*16))
+        target_backup_times.append(last_year - _timedelta(weeks=quart * 16))
 
     for year in range(0, yearly_backups):
-        target_backup_times.append(other_years- _timedelta(days = year*365))
+        target_backup_times.append(other_years - _timedelta(days=year * 365))
 
-
-    one_day = _timedelta(days = 1)
+    one_day = _timedelta(days=1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
         target_backup_times.append(start_of_month)
@@ -454,13 +450,13 @@ def _trim_snapshots(region_name, dry_run=False):
             temp.append(t)
 
     target_backup_times = temp
-    target_backup_times.reverse() # make the oldest date first
+    target_backup_times.reverse()  # make the oldest date first
 
     # get all the snapshots, sort them by date and time,
     #and organize them into one array for each volume:
-    all_snapshots = conn.get_all_snapshots(owner = 'self')
+    all_snapshots = conn.get_all_snapshots(owner='self')
     # oldest first
-    all_snapshots.sort(cmp = lambda x, y: cmp(x.start_time, y.start_time))
+    all_snapshots.sort(cmp=lambda x, y: cmp(x.start_time, y.start_time))
 
     snaps_for_each_volume = {}
     for snap in all_snapshots:
@@ -477,7 +473,6 @@ def _trim_snapshots(region_name, dry_run=False):
                 snaps_for_volume = []
                 snaps_for_each_volume[volume_name] = snaps_for_volume
             snaps_for_volume.append(snap)
-
 
     # Do a running comparison of snapshot dates to desired time periods,
     # keeping the oldest snapshot in each
@@ -566,7 +561,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     region = _get_region_by_name(region_name)
     conn = region.connect()
 
-    filters={'owner_id': ubuntu_aws_account, 'architecture': architecture,
+    filters = {'owner_id': ubuntu_aws_account, 'architecture': architecture,
              'name': ami_ptrn, 'image_type': 'machine',
              'root_device_type': 'ebs'}
     images = conn.get_all_images(filters=filters)
@@ -623,6 +618,14 @@ def _get_avail_dev(instance):
     for dev in instance.block_device_mapping:
         chars = chars.replace(dev[-2], '')
     return '/dev/sd{0}1'.format(chars[0])
+
+
+def _get_avail_dev_encr(instance):
+    """Return next unused device name."""
+    chars = lowercase
+    for dev in instance.block_device_mapping:
+        chars = chars.replace(dev[-2], '')
+    return '/dev/sd{0}'.format(chars[1])
 
 
 @_contextmanager
@@ -900,7 +903,8 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             print _format_exc()
 
 
-def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+def launch_instance_from_ami(region_name, ami_id, encrypted_root,
+                                                    inst_type=None):
     """Create instance from specified AMI.
 
     region_name
@@ -917,12 +921,17 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         [sec.name for sec in conn.get_all_security_groups()],
         'Select security group')
     _wait_for(image, ['state'], 'available')
+    if encrypted_root:
+        kernel_id = config.get(conn.region.name,
+                                           'kernel_encr_' + image.architecture)
+    else:
+        kernel_id = config.get(conn.region.name, 'kernel' + image.architecture)
     reservation = image.run(
-        key_name = config.get(conn.region.name, 'key_pair'),
-        security_groups = [_security_groups, ],
-        instance_type = inst_type,
+        key_name=config.get(conn.region.name, 'key_pair'),
+        security_groups=[_security_groups, ],
+        instance_type=inst_type,
         #Kernel workaround, not tested with natty
-        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
+        kernel_id=kernel_id)
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)
@@ -934,7 +943,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
 
 
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
-               inst_arch='x86_64', inst_type='t1.micro'):
+       root_dev_name='/dev/sda1', inst_arch='x86_64', inst_type='t1.micro',
+       encrypted_root=None):
     """
     Creates AMI image from given snapshot.
 
@@ -957,26 +967,27 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     ebs.delete_on_termination = True
     block_map = _BlockDeviceMapping()
     block_map[root_dev] = ebs
-
     name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
     name = name.replace(":", ".").replace(" ", "_")
-
     # create the new AMI all options from snap JSON description:
     result = conn.register_image(
         name=name,
-        description = snap.description,
-        architecture = _get_descr_attr(snap, 'Arch') or inst_arch,
-        root_device_name = _get_descr_attr(snap, 'Root_dev_name') or root_dev,
-        block_device_map = block_map)
+        description=snap.description,
+        architecture=_get_descr_attr(snap, 'Arch') or inst_arch,
+        root_device_name=_get_descr_attr(snap,
+                                        'Root_dev_name') or root_dev_name,
+        block_device_map=block_map)
+    _sleep(5)
     image = conn.get_all_images(image_ids=[result, ])[0]
     _clone_tags(snap, image)
-
     print 'The new AMI ID = ', result
-
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        launch_instance_from_ami(region, image.id, inst_type=inst_type)
+        _wait_for(image, ['state', ], 'available')
+        launch_instance_from_ami(region, image.id, encrypted_root,
+                                                inst_type=inst_type)
+    return image
 
 
 def modify_kernel(region, instance_id):
@@ -1009,8 +1020,273 @@ def modify_kernel(region, instance_id):
     sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
          'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
          'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
-    kernel = config.get(region, 'kernel'+instance.architecture)
+    kernel = config.get(region, 'kernel' + instance.architecture)
     instance.stop()
-    _wait_for(instance, ['state',], 'stopped')
+    _wait_for(instance, ['state', ], 'stopped')
     instance.modify_attribute('kernel', kernel)
     instance.start()
+
+
+def _make_encrypted_ubuntu(host_string, key_filename, user, hostname,
+architecture, dev, name, release):
+    with settings(host_string=host_string, user=user,
+    key_filename=key_filename, warn_only=True):
+        if release == 'lucid':
+            ext = '20110601'
+        elif release == 'natty':
+            ext = '20110426'
+        data = '/home/' + user + '/data'
+        #system = release + '-' + ext + '/' + architecture
+        page = 'https://uec-images.ubuntu.com/releases/' \
+                                + release + '/release-' + ext + '/'
+        image = release + '-server-uec-' + architecture + '.img'
+        pattern = '<a href=\\"([^\\"]*-' \
+                            + architecture + '\.tar\.gz)\\">\\1</a>'
+        bootlabel = "bootfs"
+        _sleep(30)
+        try:
+            sudo('date')
+        except BaseException as err:
+            repr(err)
+        sudo('apt-get -y install cryptsetup')
+        sudo('mkdir -p {0}'.format(data))
+        try:
+            sudo('curl -fs "{0}" > "{1}/release.html"'.format(page, data))
+        except:
+            print "Invalid system: " + release + ext
+        put('./encrypted_root/uecimage.gpg', data + '/uecimage.gpg',
+                                                                use_sudo=True)
+        file = sudo('pattern=\'<a href="([^"]*-{arch}\.tar\.gz)">\\1</a>\'; '
+        'perl -ne "m[$pattern] && "\'print "$1\\n"\' "{data}/release.html"'
+        .format(data=data, pattern=pattern, arch=architecture))
+        sudo('wget -P "{data}" "{page}{file}"'
+        .format(data=data, page=page, file=file))
+
+        def check(message, program, sums):
+            options = '--keyring=' + data + '/uecimage.gpg'
+            print message
+            sudo('curl -fs "{page}/{sums}.gpg" > "{data}/{sums}.gpg"'
+            .format(page=page, sums=sums, data=data))
+            try:
+                sudo('curl -fs "{page}/{sums}" > "{data}/{sums}"'
+                .format(page=page, sums=sums, data=data))
+            except:
+                print 'N/A'
+            try:
+                sudo('gpgv {options} "{data}/{sums}.gpg" '
+                '"{data}/{sums}" 2> /dev/null'
+                .format(options=options, sums=sums, data=data))
+            except:
+                print 'Evil.'
+            try:
+                sudo('grep "{file}" "{data}/{sums}" | (cd {data}; {program}'
+                ' --check --status)'.format(file=file, sums=sums, data=data,
+                program=program))
+            except:
+                print 'Failed.'
+            print 'Ok'
+        check('"Checking SHA256... "', 'sha256sum', 'SHA256SUMS')
+        check('"Checking SHA1....."', 'sha1sum', 'SHA1SUMS')
+        check('"Checking MD5......"', 'md5sum', 'MD5SUMS')
+
+        work = sudo('mktemp --directory')
+        sudo('touch {work}/{image}'.format(work=work, image=image))
+        sudo('tar xfz "{data}/{file}" -C "{work}" {image}'
+        .format(data=data, file=file, work=work, image=image))
+        sudo('mkdir "{work}/ubuntu"'.format(work=work))
+        sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
+        .format(image=image, work=work))
+        sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
+                                                .format(dev=dev))
+        sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
+        .format(bootlabel=bootlabel, dev=dev))
+        pw1 = prompt('Type in first password for enryption: ')
+        sudo('touch {work}/pw2.txt | echo -n {pw1} > "{work}/pw1.txt" | '
+        'chmod 700 "{work}/pw1.txt"'
+        .format(pw1=pw1, work=work))
+        pw2 = prompt('Type in second password for enryption: ')
+        sudo('touch {work}/pw2.txt | echo -n {pw2} > "{work}/pw2.txt" | '
+        'chmod 700 "{work}/pw2.txt"'
+        .format(pw2=pw2, work=work))
+        sudo('cryptsetup luksFormat -q --key-size=256 {dev}2 "{work}/pw1.txt"'
+        .format(dev=dev, work=work))
+        sudo('cryptsetup luksAddKey -q --key-file="{work}/pw1.txt" '
+        '{dev}2 "{work}/pw2.txt"'.format(work=work, dev=dev))
+        sudo('cryptsetup luksOpen --key-file="{work}/pw1.txt" {dev}2 {name}'
+        .format(work=work, dev=dev, name=name))
+        sudo('shred --remove "{work}/pw1.txt"; shred --remove'
+        ' "{work}/pw2.txt"'.format(work=work))
+        fs_type = sudo('df -T "{work}/ubuntu" | tail -1 | cut -d " " -f 5'
+        .format(work=work))
+        sudo('mkfs -t {fs_type} "/dev/mapper/{name}"'
+        .format(fs_type=fs_type, name=name))
+        sudo('/sbin/e2label "/dev/mapper/{name}" "uec-rootfs"'
+        .format(name=name))
+        sudo('mkdir -p "{work}/root"; mount /dev/mapper/{name}'
+        ' "{work}/root"'.format(work=work, name=name))
+        sudo('rsync --archive --hard-links "{work}/ubuntu/" "{work}/root/"'
+        .format(work=work))
+        boot_device = 'LABEL=' + bootlabel
+        root_device = 'UUID=$(cryptsetup luksUUID ' + dev + '2)'
+        sudo('mkdir "{work}/boot"; mount "{dev}1" "{work}/boot"'
+        .format(work=work, dev=dev))
+        sudo('rsync --archive "{work}/root/boot/" "{work}/boot"'
+        .format(work=work))
+        sudo('rm -rf "{work}/root/boot/"*'.format(work=work))
+        sudo('mount --move "{work}/boot" "{work}/root/boot"'.format(work=work))
+        sudo('echo "{boot_device} /boot ext3" >> "{work}/root/etc/fstab"'
+        .format(boot_device=boot_device, work=work))
+        sudo('sed -i -e \'s/(hd0)/(hd0,0)/\' "{work}/root/boot/grub/menu.lst"'
+        .format(work=work))
+        bozo_target = work + '/root/etc/initramfs-tools/boot'
+        sudo('mkdir -p {bozo_target}'.format(bozo_target=bozo_target))
+        put('./encrypted_root/boot.key', bozo_target + '/boot.key',
+                                                                use_sudo=True)
+        put('./encrypted_root/boot.crt', bozo_target + '/boot.crt',
+                                                                use_sudo=True)
+        put('./encrypted_root/cryptsetup',
+        work + '/root/etc/initramfs-tools/hooks/cryptsetup', use_sudo=True)
+        sudo('chmod 755 {work}/root/etc/initramfs-tools/hooks/cryptsetup'
+                                            .format(work=work))
+        sudo('sudo sed -i "s/\/dev\/sda2/{root_device}/" '
+        '{work}/root/etc/initramfs-tools/hooks/cryptsetup'.format(
+        root_device=root_device, work=work))
+        sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
+        put('./encrypted_root/cryptsetup.sh',
+        work + '/root/etc/initramfs-tools/boot/cryptsetup.sh', use_sudo=True)
+        sudo('chmod 755 {work}/root/etc/initramfs-tools/boot/cryptsetup.sh'
+                                            .format(work=work))
+        #sudo('sudo sed -i "s/cs_host=\"boot.example.com\"/cs_host=\"'
+        #'{hostname}\"/" {work}/root/etc/initramfs-tools/boot/cryptsetup.sh'
+        #.format(work=work, hostname=hostname))
+        put('./encrypted_root/make_bozo_dir.sh',
+                              bozo_target + '/make_bozo_dir.sh', use_sudo=True)
+        sudo('chmod 755 {bozo_target}/make_bozo_dir.sh'
+                                            .format(bozo_target=bozo_target))
+        put('./encrypted_root/index.html',
+                              bozo_target + '/index.html', use_sudo=True)
+        put('./encrypted_root/activate.cgi',
+                              bozo_target + '/activate.cgi', use_sudo=True)
+        sudo('chmod 755 {bozo_target}/activate.cgi'
+                                            .format(bozo_target=bozo_target))
+        put('./encrypted_root/hiding.gif',
+                              bozo_target + '/hiding.gif', use_sudo=True)
+        if release == 'lucid':
+            listfile = work + '/root/etc/apt/sources.list'
+            sudo('grep "lucid main" {listfile} | sed \'s/lucid/maverick/g\''
+            ' >> {listfile}'.format(listfile=listfile))
+            sudo('echo -e "Package: *\nPin: release a=lucid\nPin-Priority:'
+            ' 600\n\nPackage: bozohttpd\nPin: release a=maverick\n'
+            'Pin-Priority: 1000\n\nPackage: libssl0.9.8\nPin: release '
+            'a=maverick\nPin-Priority: 1000\n\nPackage: *\nPin: release '
+            'o=Ubuntu\nPin-Priority: -10\n" | tee '
+            '"{work}/root/etc/apt/preferences"'.format(work=work))
+        menufile = work + '/root/boot/grub/menu.lst'
+        initrd = sudo('grep "^initrd" "{menufile}" | head -1 | cut -f 3'
+        .format(menufile=menufile))
+        kernel = sudo('grep "^kernel" "{menufile}" | head -1 | cut -f 3 | '
+        'cut -d " " -f 1'.format(menufile=menufile))
+        sudo('rm -f "{work}/root/initrd.img.old";'
+        'rm -f "{work}/root/vmlinuz.old";rm -f "{work}/root/initrd.img";'
+        'rm -f "{work}/root/vmlinuz"'.format(work=work))
+        sudo('ln -s "{initrd}" "{work}/root/initrd.img";'
+        'ln -s "{kernel}" "{work}/root/vmlinuz"'
+        .format(initrd=initrd, kernel=kernel, work=work))
+        sudo('mv "{work}/root/etc/resolv.conf" '
+        '"{work}/root/etc/resolv.conf.old";cp "/etc/resolv.conf" '
+        '"{work}/root/etc/"'.format(work=work))
+        sudo('chroot "{work}/root" <<- EOT\n'
+        'set -e\n'
+        'mount -t devpts devpts /dev/pts/\n'
+        'mount -t proc proc /proc/\n'
+        'mount -t sysfs sysfs /sys/\n'
+        'localedef -f UTF-8 -i en_US --no-archive en_US.utf8\n'
+        'apt-get -y update\n'
+        'env DEBIAN_FRONTEND=noninteractive apt-get -y install ssl-cert mc '
+        'htop unattended-upgrades bsd-mailx\n'
+        'apt-get -y install update-inetd\n'
+        'echo -e \'APT::Periodic::Enable "1";\\nAPT::Periodic::Update-Package-'
+        'Lists "1";\\nAPT::Periodic::AutocleanInterval "0";\\nAPT::Periodic::D'
+        'ownload-Upgradeable-Packages "1";\\nAPT::Periodic::Unattended-Upgrade'
+        ' "1";\\n\' | sudo tee /etc/apt/apt.conf.d/10periodic\n'
+        'env DEBIAN_FRONTEND=noninteractive apt-get -y install zabbix-agent'
+        ' python-pip\n'
+        'env DEBIAN_FRONTEND=noninteractive pip install http://downloads.green'
+        'mice.info/products/ztc/ztc-11.03.2.tar.gz\n'
+        'mkdir /var/log/zabbix; sudo chmod 777 /var/log/zabbix\n'
+        'sed -i "s/Server=localhost/Server=zabbix.odeskps.com,10.206.109.28,18'
+        '4.73.177.59/" /etc/zabbix/zabbix_agentd.conf\n'
+        'echo "Include=/etc/zabbix-agent.d/">>/etc/zabbix/zabbix_agentd.conf; '
+        '/etc/init.d/zabbix-agent restart\n'
+        'mv /usr/sbin/update-inetd /usr/sbin/update-inetd.old\n'
+        'touch /usr/sbin/update-inetd\n'
+        'chmod a+x /usr/sbin/update-inetd\n'
+        'apt-get -y install bozohttpd\n'
+        'mv /usr/sbin/update-inetd.old /usr/sbin/update-inetd\n'
+        'EOT'.format(work=work))
+        sudo('chroot "{work}/root" <<- EOT\n'
+        'chown root:ssl-cert /etc/initramfs-tools/boot/boot.key\n'
+        'chmod 640 /etc/initramfs-tools/boot/boot.key\n'
+        'ln -s /usr/sbin/bozohttpd /etc/initramfs-tools/boot/\n'
+        'ln -s . /boot/boot\n'
+        'EOT'.format(work=work))
+        sudo('chroot "{work}/root" <<- EOT\n'
+        'apt-get -y install cryptsetup\n'
+        'apt-get -y clean\n'
+        'update-initramfs -uk all\n'
+        'mv /etc/resolv.conf.old /etc/resolv.conf\n'
+        'umount /dev/pts\n'
+        'umount /proc\n'
+        'umount /sys\n'
+        'EOT'.format(work=work))
+        sudo('shutdown -h now')
+    return
+
+
+def create_encrypted_instance(region_name, release='lucid', volume_size='8',
+security_groups=None, architecture='x86_64', type='t1.micro', name='encr_root',
+hostname=None):
+    """
+    region_name
+        Region where you want to create instance;
+    release
+        Ubuntu release name (lucid or natty);
+    volume_size
+        Size of volume in Gb (always remember, that script creates boot volume
+        with size 1Gb, so minimal size of whole volume is 3Gb (1Gb for /boot
+        2Gb for /));
+    type
+        Type of instance;
+    Creates ubuntu lucid instance with luks-encryted root volume.
+    To unlock go to https://ip_address_of_instanse (only after reboot).
+    You can set up to 8 passwords. Defaut boot.key and boot.crt created for
+    *.amazonaws.com so must work for all instances.
+    Process of creation is about 20 minutes long.
+    For now you can create only lucid x64 instance.
+    """
+    region = _get_region_by_name(region_name)
+    conn = region.connect()
+
+    with _config_temp_ssh(conn) as key_filename:
+        key_pair = _splitext(_split(key_filename)[1])[0]
+        zn = conn.get_all_zones()[-1]
+        with _create_temp_inst(zn, key_pair, [ssh_grp]) as inst:
+            vol = conn.create_volume(size=volume_size, zone=zn)
+            dev = _get_avail_dev_encr(inst)
+            vol.attach(inst.id, dev)
+            if architecture == 'x86_64':
+                arch = 'amd64'
+            else:
+                arch = architecture
+            _make_encrypted_ubuntu(inst.public_dns_name, key_filename,
+                          'ubuntu', hostname, arch, dev, name, release)
+            snap = vol.create_snapshot()
+            _wait_for(snap, ['status', ], 'completed')
+            vol.detach(force=True)
+            _wait_for(vol, ['status', ], 'available')
+            vol.delete()
+            img = create_ami(region=region_name, snap_id=snap.id,
+            root_dev='/dev/sda', inst_arch=architecture,
+            inst_type=type, force='RUN', encrypted_root='1')
+            img.deregister()
+            snap.delete()
