@@ -68,8 +68,9 @@ env.update({'disable_known_hosts': True, 'user': username})
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
-# Set up a specific logger with our desired output level
+# Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
+LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
 LOG_FILENAME = 'log_rotating_file.out'
 
 logger = logging.getLogger('Logger')
@@ -80,7 +81,7 @@ else:
     logger.setLevel(logging.INFO)
 
 # Add the log message handler to the logger
-fmt = logging.Formatter(LOG_FORMAT, datefmt='%Y-%m-%d %H:%M:%S')
+fmt = logging.Formatter(format=LOG_FORMAT, datefmt=LOG_DATEFORMAT)
 handler = logging.handlers.RotatingFileHandler(
     LOG_FILENAME, maxBytes=512000, backupCount=30)
 handler.setFormatter(fmt)
@@ -184,10 +185,8 @@ class _WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    if debug:
-                        logger.debug('{0}'.format(_format_exc()))
-                    else:
-                        logger.info('{0}'.format(repr(err)))
+                    logger.debug('{0}'.format(_format_exc()))
+                    logger.info('{0}'.format(repr(err)))
 
                     if attempts > 0:
                         logger.info('waiting next {0} sec ({1} times left)'
@@ -690,10 +689,8 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                     .format(vol=volume))
                 volume.delete()
         except _BotoServerError as err:
-            if debug:
-                logging.info('{0}'.format(_format_exc()))
-            else:
-                logging.info('{0} in {1}'.format(err, zone))
+            logging.debug('{0}'.format(_format_exc()))
+            logging.info('{0} in {1}'.format(err, zone))
             continue
         else:
             break
