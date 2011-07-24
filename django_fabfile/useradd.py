@@ -5,12 +5,16 @@ from os.path import isfile as _isfile
 from django_fabfile.utils import _get_region_by_name
 
 
-config_file = 'fabfile.cfg'
-config = _ConfigParser()
-config.read(config_file)
-username = config.get('DEFAULT', 'username')
+try:
+    config_file = 'fabfile.cfg'
+    config = _ConfigParser()
+    config.read(config_file)
+    username = config.get('DEFAULT', 'username')
+except:
+    username = None
 
-env.update({'disable_known_hosts': True, 'user': username})
+
+env.update({'disable_known_hosts': True})
 
 
 def _get_inst_by_id(region, instance_id):
@@ -67,6 +71,8 @@ def deluser(name, region=None, instance_ids=None):
     If region and instance_ids not set - script takes hosts amd key values
     from command line (-H and -i).
     """
+    if username:
+        env.update({'user': username})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
@@ -102,6 +108,8 @@ def adduser(user, region=None, instance_ids=None,
     :<user>,<region>,"instance1;instance2",<passwordless>,<sudo>
     Extracts IP's from instance description.
     """
+    if username:
+        env.update({'user': username})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
