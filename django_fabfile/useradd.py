@@ -9,9 +9,9 @@ try:
     config_file = 'fabfile.cfg'
     config = _ConfigParser()
     config.read(config_file)
-    username = config.get('DEFAULT', 'username')
+    user = config.get('odesk', 'username')
 except:
-    username = None
+    user = None
 
 
 env.update({'disable_known_hosts': True})
@@ -35,11 +35,11 @@ def _sudo(cmd):
     sudo(cmd, shell=False, pty=False)
 
 
-def _create_account(user, region, instance_ids, passwordless, sudo):
-    if not _isfile(user + '.pub'):
-        abort("%s.pub does not exist" % user)
-    env.ssh_key = user + '.pub'
-    env.username = user
+def _create_account(username, region, instance_ids, passwordless, sudo):
+    if not _isfile(username + '.pub'):
+        abort("%s.pub does not exist" % username)
+    env.ssh_key = username + '.pub'
+    env.username = username     # Own attribute for string formatting.
     if passwordless:
         _sudo('adduser --disabled-password %(username)s' % env)
         if sudo:
@@ -58,7 +58,7 @@ def _create_account(user, region, instance_ids, passwordless, sudo):
     _sudo('touch /home/%(username)s/.ssh/authorized_keys' % env)
     _sudo('chown -R %(username)s: /home/%(username)s/.ssh' % env)
     _sudo('chmod 700 /home/%(username)s/.ssh' % env)
-    put(user + '.pub', '/home/%(username)s/.ssh/authorized_keys'
+    put(env.ssh_key, '/home/%(username)s/.ssh/authorized_keys'
                                       % env, use_sudo=True)
     _sudo('chown -R %(username)s: /home/%(username)s/.'
                                     'ssh/authorized_keys' % env)
@@ -71,8 +71,8 @@ def deluser(name, region=None, instance_ids=None):
     If region and instance_ids not set - script takes hosts amd key values
     from command line (-H and -i).
     """
-    if username:
-        env.update({'user': username})
+    if user:
+        env.update({'user': user})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
@@ -91,10 +91,10 @@ def deluser(name, region=None, instance_ids=None):
         _sudo('deluser %(username)s' % env)
 
 
-def adduser(user, region=None, instance_ids=None,
+def adduser(username, region=None, instance_ids=None,
                                 passwordless=None, sudo=None):
     """
-    creates new <user> with public SSH key on "host1;host2" list in
+    creates new <username> with public SSH key on "host1;host2" list in
     <region>. If you want to create passwordless account - set any value to
     <passwrdless> variable, if you want sudo rights - set any value to <sudo>.
     File with public key must be in same directory.
@@ -102,14 +102,14 @@ def adduser(user, region=None, instance_ids=None,
     from command line (-H and -i).
     Usage:
     1. WIthout aws api keys and config present:
-    :<user>,<passwordless=1>,<sudo=1> - in this case you have to specify
-    hosts list in -H and your user in -u  fabric parameters.
+    :<username>,<passwordless=1>,<sudo=1> - in this case you have to specify
+    hosts list in -H and your own account in -u fabric parameters.
     2. With aws api keys and config entries:
-    :<user>,<region>,"instance1;instance2",<passwordless>,<sudo>
+    :<username>,<region>,"instance1;instance2",<passwordless>,<sudo>
     Extracts IP's from instance description.
     """
-    if username:
-        env.update({'user': username})
+    if user:
+        env.update({'user': user})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
@@ -120,7 +120,7 @@ def adduser(user, region=None, instance_ids=None,
                                                       'key_filename')
                     env.update({'key_filename': key_filename})
                 env.update({'host_string': _instance.public_dns_name})
-                _create_account(user, region, instance_ids, passwordless,
+                _create_account(username, region, instance_ids, passwordless,
                                                                     sudo)
     else:
-        _create_account(user, region, instance_ids, passwordless, sudo)
+        _create_account(username, region, instance_ids, passwordless, sudo)

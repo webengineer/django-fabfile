@@ -5,7 +5,6 @@ ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{rele
 ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
 architecture = x86_64
 debug = False
-odesk_username = 
 ssh_security_group = ssh-access
 ssh_timeout_attempts = 30
 ssh_timeout_interval = 30
@@ -13,6 +12,9 @@ tag_name = Earmarking
 tag_value = production
 ubuntu_aws_account = 099720109477
 username = ubuntu
+
+[odesk]
+username = odesk-username
 
 [purge_backups]
 hourly_backups = 24

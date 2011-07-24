@@ -9,7 +9,7 @@ config = _ConfigParser()
 config.read(config_file)
 master = config.get('RDBMS', 'master')
 backup = config.get('RDBMS', 'backup')
-username = config.get('DEFAULT', 'odesk_username')
+username = config.get('odesk', 'username')
 pcp_password = config.get('RDBMS', 'pcp_password')
 
 env.update({'disable_known_hosts': True, 'user': username, 'warn_only': True})
