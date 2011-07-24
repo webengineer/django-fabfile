@@ -3,11 +3,28 @@
 Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
-All other options will be taken from ./fabfile.cfg file.
+All other options will be taken from ./fabfile.cfg file - copy-paste it
+from `django_fabfile/fabfile.cfg.def`.
 
-Commands presented to user (i.e. functions without preceeding
-underscore) should guess region by beginning if its name using
-`_get_region_by_name()`.
+USAGE:
+------
+
+  1. For backup creation you must specify instance_id and region in
+  [main] section. To create snapshot of mounted volume, run:
+          fab -f backup.py backup_instance
+  2. To purge old snapshots you must specify # of snapshots to save in
+  [mount_backups], specify instance_id and region in [main] section.
+  Then run:
+          fab -f backup.py trim_snapshots
+  3. To mount backup specify needed values in [mount_backups] section of
+  fabfile.cfg, specify instance_id and region in [main] section. Then run:
+          fab -f backup.py mount_snapshot
+  4. To backup all instances in all regions, which tagged with some tag
+  ('Earmarking':'production' for example), add this tags to [main]
+  section of fabfile.cfg and run:
+          fab -f backup.py backup_instances_by_regions
+  5. To purge old snapshots in all regions, run:
+          fab -f backup.py trim_snapshots_for_regions
 '''
 
 from datetime import timedelta as _timedelta, datetime
@@ -35,6 +52,8 @@ from boto.ec2.blockdevicemapping import (
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
 from fabric.api import env, prompt, put, sudo
+
+from django_fabfile.utils import _get_region_by_name
 
 
 config_file = 'fabfile.cfg'
@@ -199,14 +218,6 @@ def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
-
-
-def _get_region_by_name(region_name):
-    """Allow to specify region name fuzzyly."""
-    matched = [reg for reg in _regions() if _match(region_name, reg.name)]
-    assert len(matched) > 0, 'No region matches {0}'.format(region_name)
-    assert len(matched) == 1, 'Several regions matches {0}'.format(region_name)
-    return matched[0]
 
 
 def _get_inst_by_id(region, instance_id):

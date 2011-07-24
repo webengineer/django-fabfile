@@ -1,8 +1,8 @@
 from fabric.api import env, settings, sudo, abort, put
 from ConfigParser import ConfigParser as _ConfigParser
-from re import match as _match
 from os.path import isfile as _isfile
-from boto.ec2 import regions as _regions
+
+from django_fabfile.utils import _get_region_by_name
 
 
 config_file = 'fabfile.cfg'
@@ -11,18 +11,6 @@ config.read(config_file)
 username = config.get('DEFAULT', 'username')
 
 env.update({'disable_known_hosts': True, 'user': username})
-
-
-def _get_region_by_name(region_name):
-    """
-    Not using from backup import _get_region_by_name because
-    backup.py reqires existing aws api keys.
-    Allow to specify region name fuzzyly.
-    """
-    matched = [reg for reg in _regions() if _match(region_name, reg.name)]
-    assert len(matched) > 0, 'No region matches {0}'.format(region_name)
-    assert len(matched) == 1, 'Several regions matches {0}'.format(region_name)
-    return matched[0]
 
 
 def _get_inst_by_id(region, instance_id):
