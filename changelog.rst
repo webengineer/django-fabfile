@@ -1,3 +1,8 @@
+Version 2011.07.24.1
+--------------------
+
+Added configuration option `username` in new `odesk` section.
+
 Version 2011.07.21.1
 --------------------
 
