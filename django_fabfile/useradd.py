@@ -5,16 +5,12 @@ from os.path import isfile as _isfile
 from boto.ec2 import regions as _regions
 
 
-try:
-    config_file = 'fabfile.cfg'
-    config = _ConfigParser()
-    config.read(config_file)
-    username = config.get('DEFAULT', 'username')
-except:
-    username = None
+config_file = 'fabfile.cfg'
+config = _ConfigParser()
+config.read(config_file)
+username = config.get('DEFAULT', 'username')
 
-
-env.update({'disable_known_hosts': True})
+env.update({'disable_known_hosts': True, 'user': username})
 
 
 def _get_region_by_name(region_name):
@@ -83,8 +79,6 @@ def deluser(name, region=None, instance_ids=None):
     If region and instance_ids not set - script takes hosts amd key values
     from command line (-H and -i).
     """
-    if username:
-        env.update({'user': username})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
@@ -120,8 +114,6 @@ def adduser(user, region=None, instance_ids=None,
     :<user>,<region>,"instance1;instance2",<passwordless>,<sudo>
     Extracts IP's from instance description.
     """
-    if username:
-        env.update({'user': username})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
