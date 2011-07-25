@@ -35,6 +35,7 @@ from boto.ec2.blockdevicemapping import (
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
 from fabric.api import env, prompt, put, sudo, settings
+from fabric.context_managers import hide
 
 
 config_file = 'fabfile.cfg'
@@ -1032,7 +1033,7 @@ architecture, dev, name, release):
     with settings(host_string=host_string, user=user,
     key_filename=key_filename, warn_only=True):
         if release == 'lucid':
-            ext = '20110601'
+            ext = '20110719'
         elif release == 'natty':
             ext = '20110426'
         data = '/home/' + user + '/data'
@@ -1048,198 +1049,230 @@ architecture, dev, name, release):
             sudo('date')
         except BaseException as err:
             repr(err)
-        sudo('apt-get -y install cryptsetup')
-        sudo('mkdir -p {0}'.format(data))
-        try:
-            sudo('curl -fs "{0}" > "{1}/release.html"'.format(page, data))
-        except:
-            print "Invalid system: " + release + ext
-        put('./encrypted_root/uecimage.gpg', data + '/uecimage.gpg',
-                                                                use_sudo=True)
-        file = sudo('pattern=\'<a href="([^"]*-{arch}\.tar\.gz)">\\1</a>\'; '
-        'perl -ne "m[$pattern] && "\'print "$1\\n"\' "{data}/release.html"'
-        .format(data=data, pattern=pattern, arch=architecture))
-        sudo('wget -P "{data}" "{page}{file}"'
-        .format(data=data, page=page, file=file))
+        with hide('running', 'stdout'):
+            pw1 = pw2 = None
+            while pw1 == pw2:
+                pw1 = prompt('Type in first password for enryption: ')
+                pw2 = prompt('Type in second password for enryption: ')
+                if pw1 == pw2:
+                    print "\nPasswords can't be the same.\n"
+            print "Installing cryptsetup....."
+            sudo('apt-get -y install cryptsetup')
+            sudo('mkdir -p {0}'.format(data))
+            try:
+                print "Downloading releases list....."
+                sudo('curl -fs "{0}" > "{1}/release.html"'.format(page, data))
+            except:
+                print "Invalid system: " + release + ext
+            print "Uploading uecimage.gpg....."
+            put('./encrypted_root.tar.gz', data + '/encrypted_root.tar.gz',
+                                    use_sudo=True, mirror_local_mode=True)
+            sudo('cd {data}; tar -xf {data}/encrypted_root.tar.gz'
+            .format(data=data))
+            #put('./encrypted_root/uecimage.gpg', data + '/uecimage.gpg',
+                                                                #use_sudo=True)
+            file = sudo('pattern=\'<a href="([^"]*-{arch}\.tar\.gz)">'
+            '\\1</a>\'; perl -ne "m[$pattern] && "\'print "$1\\n"\' '
+            '"{data}/release.html"'.format(data=data, pattern=pattern,
+            arch=architecture))
+            print "Downloading ubuntu image....."
+            sudo('wget -P "{data}" "{page}{file}"'
+            .format(data=data, page=page, file=file))
 
         def check(message, program, sums):
-            options = '--keyring=' + data + '/uecimage.gpg'
-            print message
-            sudo('curl -fs "{page}/{sums}.gpg" > "{data}/{sums}.gpg"'
-            .format(page=page, sums=sums, data=data))
-            try:
-                sudo('curl -fs "{page}/{sums}" > "{data}/{sums}"'
+            with hide('running', 'stdout'):
+                options = '--keyring=' + data + '/encrypted_root/uecimage.gpg'
+                print message
+                sudo('curl -fs "{page}/{sums}.gpg" > "{data}/{sums}.gpg"'
                 .format(page=page, sums=sums, data=data))
-            except:
-                print 'N/A'
-            try:
-                sudo('gpgv {options} "{data}/{sums}.gpg" '
-                '"{data}/{sums}" 2> /dev/null'
-                .format(options=options, sums=sums, data=data))
-            except:
-                print 'Evil.'
-            try:
-                sudo('grep "{file}" "{data}/{sums}" | (cd {data}; {program}'
-                ' --check --status)'.format(file=file, sums=sums, data=data,
-                program=program))
-            except:
-                print 'Failed.'
-            print 'Ok'
-        check('"Checking SHA256... "', 'sha256sum', 'SHA256SUMS')
-        check('"Checking SHA1....."', 'sha1sum', 'SHA1SUMS')
-        check('"Checking MD5......"', 'md5sum', 'MD5SUMS')
-
-        work = sudo('mktemp --directory')
-        sudo('touch {work}/{image}'.format(work=work, image=image))
-        sudo('tar xfz "{data}/{file}" -C "{work}" {image}'
-        .format(data=data, file=file, work=work, image=image))
-        sudo('mkdir "{work}/ubuntu"'.format(work=work))
-        sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
-        .format(image=image, work=work))
-        sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
-                                                .format(dev=dev))
-        sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
-        .format(bootlabel=bootlabel, dev=dev))
-        pw1 = prompt('Type in first password for enryption: ')
-        sudo('touch {work}/pw2.txt | echo -n {pw1} > "{work}/pw1.txt" | '
-        'chmod 700 "{work}/pw1.txt"'
-        .format(pw1=pw1, work=work))
-        pw2 = prompt('Type in second password for enryption: ')
-        sudo('touch {work}/pw2.txt | echo -n {pw2} > "{work}/pw2.txt" | '
-        'chmod 700 "{work}/pw2.txt"'
-        .format(pw2=pw2, work=work))
-        sudo('cryptsetup luksFormat -q --key-size=256 {dev}2 "{work}/pw1.txt"'
-        .format(dev=dev, work=work))
-        sudo('cryptsetup luksAddKey -q --key-file="{work}/pw1.txt" '
-        '{dev}2 "{work}/pw2.txt"'.format(work=work, dev=dev))
-        sudo('cryptsetup luksOpen --key-file="{work}/pw1.txt" {dev}2 {name}'
-        .format(work=work, dev=dev, name=name))
-        sudo('shred --remove "{work}/pw1.txt"; shred --remove'
-        ' "{work}/pw2.txt"'.format(work=work))
-        fs_type = sudo('df -T "{work}/ubuntu" | tail -1 | cut -d " " -f 5'
-        .format(work=work))
-        sudo('mkfs -t {fs_type} "/dev/mapper/{name}"'
-        .format(fs_type=fs_type, name=name))
-        sudo('/sbin/e2label "/dev/mapper/{name}" "uec-rootfs"'
-        .format(name=name))
-        sudo('mkdir -p "{work}/root"; mount /dev/mapper/{name}'
-        ' "{work}/root"'.format(work=work, name=name))
-        sudo('rsync --archive --hard-links "{work}/ubuntu/" "{work}/root/"'
-        .format(work=work))
-        boot_device = 'LABEL=' + bootlabel
-        root_device = 'UUID=$(cryptsetup luksUUID ' + dev + '2)'
-        sudo('mkdir "{work}/boot"; mount "{dev}1" "{work}/boot"'
-        .format(work=work, dev=dev))
-        sudo('rsync --archive "{work}/root/boot/" "{work}/boot"'
-        .format(work=work))
-        sudo('rm -rf "{work}/root/boot/"*'.format(work=work))
-        sudo('mount --move "{work}/boot" "{work}/root/boot"'.format(work=work))
-        sudo('echo "{boot_device} /boot ext3" >> "{work}/root/etc/fstab"'
-        .format(boot_device=boot_device, work=work))
-        sudo('sed -i -e \'s/(hd0)/(hd0,0)/\' "{work}/root/boot/grub/menu.lst"'
-        .format(work=work))
-        bozo_target = work + '/root/etc/initramfs-tools/boot'
-        sudo('mkdir -p {bozo_target}'.format(bozo_target=bozo_target))
-        put('./encrypted_root/boot.key', bozo_target + '/boot.key',
-                                                                use_sudo=True)
-        put('./encrypted_root/boot.crt', bozo_target + '/boot.crt',
-                                                                use_sudo=True)
-        put('./encrypted_root/cryptsetup',
-        work + '/root/etc/initramfs-tools/hooks/cryptsetup', use_sudo=True)
-        sudo('chmod 755 {work}/root/etc/initramfs-tools/hooks/cryptsetup'
-                                            .format(work=work))
-        sudo('sudo sed -i "s/\/dev\/sda2/{root_device}/" '
-        '{work}/root/etc/initramfs-tools/hooks/cryptsetup'.format(
-        root_device=root_device, work=work))
-        sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
-        put('./encrypted_root/cryptsetup.sh',
-        work + '/root/etc/initramfs-tools/boot/cryptsetup.sh', use_sudo=True)
-        sudo('chmod 755 {work}/root/etc/initramfs-tools/boot/cryptsetup.sh'
-                                            .format(work=work))
-        #sudo('sudo sed -i "s/cs_host=\"boot.example.com\"/cs_host=\"'
-        #'{hostname}\"/" {work}/root/etc/initramfs-tools/boot/cryptsetup.sh'
-        #.format(work=work, hostname=hostname))
-        put('./encrypted_root/make_bozo_dir.sh',
-                              bozo_target + '/make_bozo_dir.sh', use_sudo=True)
-        sudo('chmod 755 {bozo_target}/make_bozo_dir.sh'
-                                            .format(bozo_target=bozo_target))
-        put('./encrypted_root/index.html',
-                              bozo_target + '/index.html', use_sudo=True)
-        put('./encrypted_root/activate.cgi',
-                              bozo_target + '/activate.cgi', use_sudo=True)
-        sudo('chmod 755 {bozo_target}/activate.cgi'
-                                            .format(bozo_target=bozo_target))
-        put('./encrypted_root/hiding.gif',
-                              bozo_target + '/hiding.gif', use_sudo=True)
+                try:
+                    sudo('curl -fs "{page}/{sums}" > "{data}/{sums}"'
+                    .format(page=page, sums=sums, data=data))
+                except:
+                    print 'N/A'
+                try:
+                    sudo('gpgv {options} "{data}/{sums}.gpg" '
+                    '"{data}/{sums}" 2> /dev/null'
+                    .format(options=options, sums=sums, data=data))
+                except:
+                    print 'Evil.'
+                try:
+                    sudo('grep "{file}" "{data}/{sums}" | (cd {data};'
+                    ' {program} --check --status)'.format(file=file, sums=sums,
+                    data=data, program=program))
+                except:
+                    print 'Failed.'
+                print 'Ok'
+        check('Checking SHA256...', 'sha256sum', 'SHA256SUMS')
+        check('Checking SHA1.....', 'sha1sum', 'SHA1SUMS')
+        check('Checking MD5......', 'md5sum', 'MD5SUMS')
+        with hide('running', 'stdout'):
+            work = sudo('mktemp --directory')
+            sudo('touch {work}/{image}'.format(work=work, image=image))
+            print "Unpacking ubuntu image....."
+            sudo('tar xfz "{data}/{file}" -C "{work}" {image}'
+            .format(data=data, file=file, work=work, image=image))
+            sudo('mkdir "{work}/ubuntu"'.format(work=work))
+            print "Mounting ubuntu image to working directory....."
+            sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
+            .format(image=image, work=work))
+            print "Creating separate boot volume....."
+            sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
+            .format(dev=dev))
+            print "Formatting boot volume....."
+            sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
+            .format(bootlabel=bootlabel, dev=dev))
+            sudo('touch {work}/pw2.txt | echo -n {pw1} > "{work}/pw1.txt" | '
+            'chmod 700 "{work}/pw1.txt"'
+            .format(pw1=pw1, work=work))
+            sudo('touch {work}/pw2.txt | echo -n {pw2} > "{work}/pw2.txt" | '
+            'chmod 700 "{work}/pw2.txt"'
+            .format(pw2=pw2, work=work))
+            print "Creating luks encrypted volume....."
+            sudo('cryptsetup luksFormat -q --key-size=256 {dev}2 "{work}/'
+            'pw1.txt"'.format(dev=dev, work=work))
+            print "Adding second key to encrypted volume....."
+            sudo('cryptsetup luksAddKey -q --key-file="{work}/pw1.txt" '
+            '{dev}2 "{work}/pw2.txt"'.format(work=work, dev=dev))
+            print "Opening luks encrypted volume....."
+            sudo('cryptsetup luksOpen --key-file="{work}/pw1.txt" '
+            '{dev}2 {name}'.format(work=work, dev=dev, name=name))
+            sudo('shred --remove "{work}/pw1.txt"; shred --remove'
+            ' "{work}/pw2.txt"'.format(work=work))
+            fs_type = sudo('df -T "{work}/ubuntu" | tail -1 | cut -d " " -f 5'
+            .format(work=work))
+            print "Creating filesystem on luks encrypted volume....."
+            sudo('mkfs -t {fs_type} "/dev/mapper/{name}"'
+            .format(fs_type=fs_type, name=name))
+            sudo('/sbin/e2label "/dev/mapper/{name}" "uec-rootfs"'
+            .format(name=name))
+            print "Mounting luks encrypted volume....."
+            sudo('mkdir -p "{work}/root"; mount /dev/mapper/{name}'
+            ' "{work}/root"'.format(work=work, name=name))
+            print "Starting syncronisation of working dir with ubuntu image..."
+            sudo('rsync --progress --archive --hard-links "{work}/ubuntu/"'
+            ' "{work}/root/"'.format(work=work))
+            boot_device = 'LABEL=' + bootlabel
+            root_device = 'UUID=$(cryptsetup luksUUID ' + dev + '2)'
+            sudo('mkdir "{work}/boot"; mount "{dev}1" "{work}/boot"'
+            .format(work=work, dev=dev))
+            sudo('rsync --archive "{work}/root/boot/" "{work}/boot"'
+            .format(work=work))
+            sudo('rm -rf "{work}/root/boot/"*'.format(work=work))
+            sudo('mount --move "{work}/boot" "{work}/root/boot"'
+            .format(work=work))
+            sudo('echo "{boot_device} /boot ext3" >> "{work}/root/etc/fstab"'
+            .format(boot_device=boot_device, work=work))
+            sudo('sed -i -e \'s/(hd0)/(hd0,0)/\' "{work}/root/boot/grub/menu.'
+            'lst"'.format(work=work))
+            bozo_target = work + '/root/etc/initramfs-tools/boot'
+            sudo('mkdir -p {bozo_target}'.format(bozo_target=bozo_target))
+            print "Copying files for preboot web-auth....."
+            sudo('cp {data}/encrypted_root/cryptsetup '
+            '{work}/root/etc/initramfs-tools/hooks/cryptsetup'
+            .format(data=data, work=work))
+            sudo('cp {data}/encrypted_root/boot.key {bozo_target}/boot.key'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/boot.crt {bozo_target}/boot.crt'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/cryptsetup.sh '
+            '{bozo_target}/cryptsetup.sh'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/make_bozo_dir.sh '
+            '{bozo_target}/make_bozo_dir.sh'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/index.html '
+            '{bozo_target}/index.html'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/activate.cgi '
+            '{bozo_target}/activate.cgi'
+            .format(data=data, bozo_target=bozo_target))
+            sudo('cp {data}/encrypted_root/hiding.gif '
+            '{bozo_target}/hiding.gif'
+            .format(data=data, bozo_target=bozo_target))
+            print "Modifying scripts to match our volumes....."
+            sudo('sed -i "s/\/dev\/sda2/{root_device}/" '
+            '{work}/root/etc/initramfs-tools/hooks/cryptsetup'.format(
+            root_device=root_device, work=work))
+            sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
         if release == 'lucid':
-            listfile = work + '/root/etc/apt/sources.list'
-            sudo('grep "lucid main" {listfile} | sed \'s/lucid/maverick/g\''
-            ' >> {listfile}'.format(listfile=listfile))
-            sudo('echo -e "Package: *\nPin: release a=lucid\nPin-Priority:'
+            print "Adding apt entries for lucid....."
+            with hide('running', 'stdout'):
+                listfile = work + '/root/etc/apt/sources.list'
+                sudo('grep "lucid main" {listfile} | sed \''
+                's/lucid/maverick/g\' >> {listfile}'.format(listfile=listfile))
+                sudo('echo -e "Package: *\nPin: release a=lucid\nPin-Priority:'
             ' 600\n\nPackage: bozohttpd\nPin: release a=maverick\n'
             'Pin-Priority: 1000\n\nPackage: libssl0.9.8\nPin: release '
-            'a=maverick\nPin-Priority: 1000\n\nPackage: *\nPin: release '
-            'o=Ubuntu\nPin-Priority: -10\n" | tee '
+            'a=maverick\nPin-Priority: 1000\n" | tee '
             '"{work}/root/etc/apt/preferences"'.format(work=work))
         menufile = work + '/root/boot/grub/menu.lst'
-        initrd = sudo('grep "^initrd" "{menufile}" | head -1 | cut -f 3'
-        .format(menufile=menufile))
-        kernel = sudo('grep "^kernel" "{menufile}" | head -1 | cut -f 3 | '
-        'cut -d " " -f 1'.format(menufile=menufile))
-        sudo('rm -f "{work}/root/initrd.img.old";'
-        'rm -f "{work}/root/vmlinuz.old";rm -f "{work}/root/initrd.img";'
-        'rm -f "{work}/root/vmlinuz"'.format(work=work))
-        sudo('ln -s "{initrd}" "{work}/root/initrd.img";'
-        'ln -s "{kernel}" "{work}/root/vmlinuz"'
-        .format(initrd=initrd, kernel=kernel, work=work))
-        sudo('mv "{work}/root/etc/resolv.conf" '
-        '"{work}/root/etc/resolv.conf.old";cp "/etc/resolv.conf" '
-        '"{work}/root/etc/"'.format(work=work))
-        sudo('chroot "{work}/root" <<- EOT\n'
-        'set -e\n'
-        'mount -t devpts devpts /dev/pts/\n'
-        'mount -t proc proc /proc/\n'
-        'mount -t sysfs sysfs /sys/\n'
-        'localedef -f UTF-8 -i en_US --no-archive en_US.utf8\n'
-        'apt-get -y update\n'
-        'env DEBIAN_FRONTEND=noninteractive apt-get -y install ssl-cert mc '
-        'htop unattended-upgrades bsd-mailx\n'
-        'apt-get -y install update-inetd\n'
-        'echo -e \'APT::Periodic::Enable "1";\\nAPT::Periodic::Update-Package-'
-        'Lists "1";\\nAPT::Periodic::AutocleanInterval "0";\\nAPT::Periodic::D'
-        'ownload-Upgradeable-Packages "1";\\nAPT::Periodic::Unattended-Upgrade'
-        ' "1";\\n\' | sudo tee /etc/apt/apt.conf.d/10periodic\n'
-        'env DEBIAN_FRONTEND=noninteractive apt-get -y install zabbix-agent'
-        ' python-pip\n'
-        'env DEBIAN_FRONTEND=noninteractive pip install http://downloads.green'
-        'mice.info/products/ztc/ztc-11.03.2.tar.gz\n'
-        'mkdir /var/log/zabbix; sudo chmod 777 /var/log/zabbix\n'
-        'sed -i "s/Server=localhost/Server=zabbix.odeskps.com,10.206.109.28,18'
-        '4.73.177.59/" /etc/zabbix/zabbix_agentd.conf\n'
-        'echo "Include=/etc/zabbix-agent.d/">>/etc/zabbix/zabbix_agentd.conf; '
-        '/etc/init.d/zabbix-agent restart\n'
-        'mv /usr/sbin/update-inetd /usr/sbin/update-inetd.old\n'
-        'touch /usr/sbin/update-inetd\n'
-        'chmod a+x /usr/sbin/update-inetd\n'
-        'apt-get -y install bozohttpd\n'
-        'mv /usr/sbin/update-inetd.old /usr/sbin/update-inetd\n'
-        'EOT'.format(work=work))
-        sudo('chroot "{work}/root" <<- EOT\n'
-        'chown root:ssl-cert /etc/initramfs-tools/boot/boot.key\n'
-        'chmod 640 /etc/initramfs-tools/boot/boot.key\n'
-        'ln -s /usr/sbin/bozohttpd /etc/initramfs-tools/boot/\n'
-        'ln -s . /boot/boot\n'
-        'EOT'.format(work=work))
-        sudo('chroot "{work}/root" <<- EOT\n'
-        'apt-get -y install cryptsetup\n'
-        'apt-get -y clean\n'
-        'update-initramfs -uk all\n'
-        'mv /etc/resolv.conf.old /etc/resolv.conf\n'
-        'umount /dev/pts\n'
-        'umount /proc\n'
-        'umount /sys\n'
-        'EOT'.format(work=work))
-        sudo('shutdown -h now')
+        with hide('running', 'stdout'):
+            initrd = sudo('grep "^initrd" "{menufile}" | head -1 | cut -f 3'
+            .format(menufile=menufile))
+            kernel = sudo('grep "^kernel" "{menufile}" | head -1 | cut -f 3 | '
+            'cut -d " " -f 1'.format(menufile=menufile))
+            sudo('rm -f "{work}/root/initrd.img.old";'
+            'rm -f "{work}/root/vmlinuz.old";rm -f "{work}/root/initrd.img";'
+            'rm -f "{work}/root/vmlinuz"'.format(work=work))
+            print "Creating symbolic links for kernel....."
+            sudo('ln -s "{initrd}" "{work}/root/initrd.img";'
+            'ln -s "{kernel}" "{work}/root/vmlinuz"'
+            .format(initrd=initrd, kernel=kernel, work=work))
+            sudo('mv "{work}/root/etc/resolv.conf" '
+            '"{work}/root/etc/resolv.conf.old";cp "/etc/resolv.conf" '
+            '"{work}/root/etc/"'.format(work=work))
+            print "Chrooting to working directory and installing needed apps.."
+            sudo('chroot "{work}/root" <<- EOT\n'
+            'set -e\n'
+            'mount -t devpts devpts /dev/pts/\n'
+            'mount -t proc proc /proc/\n'
+            'mount -t sysfs sysfs /sys/\n'
+            'localedef -f UTF-8 -i en_US --no-archive en_US.utf8\n'
+            'apt-get -y update\n'
+            'env DEBIAN_FRONTEND=noninteractive apt-get -y install ssl-cert'
+            ' mc htop unattended-upgrades bsd-mailx\n'
+            'apt-get -y install update-inetd\n'
+            'echo -e \'APT::Periodic::Enable "1";\\nAPT::Periodic::Update-'
+            'Package-Lists "1";\\nAPT::Periodic::AutocleanInterval "0";\\nAPT:'
+            ':Periodic::Download-Upgradeable-Packages "1";\\nAPT::Periodic:'
+            ':Unattended-Upgrade "1";\\n\' | sudo tee /etc/apt/apt.conf.d/'
+            '10periodic\nenv DEBIAN_FRONTEND=noninteractive apt-get -y install'
+            ' zabbix-agent python-setuptools python-pip\n'
+            'env DEBIAN_FRONTEND=noninteractive pip install http://downloads.'
+            'greenmice.info/products/ztc/ztc-11.03.2.tar.gz\n'
+            'mkdir /var/log/zabbix; sudo chmod 777 /var/log/zabbix\n'
+            'sed -i "s/Server=localhost/Server=zabbix.odeskps.com,10.206.109'
+            '.28,184.73.177.59/" /etc/zabbix/zabbix_agentd.conf\n'
+            'echo "Include=/etc/zabbix-agent.d/">>/etc/zabbix/zabbix_agentd'
+            '.conf; /etc/init.d/zabbix-agent restart\n'
+            'mv /usr/sbin/update-inetd /usr/sbin/update-inetd.old\n'
+            'touch /usr/sbin/update-inetd\n'
+            'chmod a+x /usr/sbin/update-inetd\n'
+            'apt-get -y install bozohttpd\n'
+            'mv /usr/sbin/update-inetd.old /usr/sbin/update-inetd\n'
+            'EOT'.format(work=work))
+            print "Fixing permissions for boot.key and symlinking bozohttpd..."
+            sudo('chroot "{work}/root" <<- EOT\n'
+            'chown root:ssl-cert /etc/initramfs-tools/boot/boot.key\n'
+            'chmod 640 /etc/initramfs-tools/boot/boot.key\n'
+            'ln -s /usr/sbin/bozohttpd /etc/initramfs-tools/boot/\n'
+            'ln -s . /boot/boot\n'
+            'EOT'.format(work=work))
+            print "Instaling cryptsetup and unmounting....."
+            sudo('chroot "{work}/root" <<- EOT\n'
+            'apt-get -y install cryptsetup\n'
+            'apt-get -y clean\n'
+            #'env DEBIAN_FRONTEND=noninteractive apt-get'
+            #' -y --force-yes dist-upgrade\n'
+            #'update-initramfs -uk all\n'
+            'mv /etc/resolv.conf.old /etc/resolv.conf\n'
+            'umount /dev/pts\n'
+            'umount /proc\n'
+            'umount /sys\n'
+            'EOT'.format(work=work))
+            print "Shutting down temporary instance"
+            sudo('shutdown -h now')
     return
 
 
