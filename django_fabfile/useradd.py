@@ -9,10 +9,13 @@ try:
     config_file = 'fabfile.cfg'
     config = _ConfigParser()
     config.read(config_file)
-    user = config.get('odesk', 'username')
+    preconfigured_user = config.get('odesk', 'username')
 except:
-    user = None
-
+    pass    # Expecting user to be provided as `-u` option.
+else:
+    FABRIC_DEFAULT_USER = 'user'    # XXX `-u user` will be overridden.
+    if env['user'] == FABRIC_DEFAULT_USER:  # Not provided as `-u` option.
+        env.update({'user': preconfigured_user})
 
 env.update({'disable_known_hosts': True})
 
@@ -71,8 +74,6 @@ def deluser(name, region=None, instance_ids=None):
     If region and instance_ids not set - script takes hosts amd key values
     from command line (-H and -i).
     """
-    if user:
-        env.update({'user': user})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
@@ -108,8 +109,6 @@ def adduser(username, region=None, instance_ids=None,
     :<username>,<region>,"instance1;instance2",<passwordless>,<sudo>
     Extracts IP's from instance description.
     """
-    if user:
-        env.update({'user': user})
     if instance_ids and region:
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:

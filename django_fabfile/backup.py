@@ -973,6 +973,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
+    _wait_for(snap, ['status', ], 'completed')
     result = conn.register_image(
         name=name,
         description = snap.description,
