@@ -81,7 +81,7 @@ else:
     logger.setLevel(logging.INFO)
 
 # Add the log message handler to the logger
-fmt = logging.Formatter(format=LOG_FORMAT, datefmt=LOG_DATEFORMAT)
+fmt = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFORMAT)
 handler = logging.handlers.RotatingFileHandler(
     LOG_FILENAME, maxBytes=512000, backupCount=30)
 handler.setFormatter(fmt)
