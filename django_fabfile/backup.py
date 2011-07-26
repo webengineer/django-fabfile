@@ -197,8 +197,8 @@ class _WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    logger.debug('{0}'.format(_format_exc()))
-                    logger.info('{0}'.format(repr(err)))
+                    logger.debug(_format_exc())
+                    logger.info(repr(err))
 
                     if attempts > 0:
                         logger.info('waiting next {0} sec ({1} times left)'
@@ -545,7 +545,7 @@ def _trim_snapshots(region_name, dry_run=False):
                                 try:
                                     conn.delete_snapshot(snap.id)
                                 except _EC2ResponseError as err:
-                                    logger.info('{0}'.format(str(err)))
+                                    logger.exception(str(err))
                                 else:
                                     logger.info('Trimmed {0} {1} from {2}'
                                         .format(snap, snap.description,
@@ -685,7 +685,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None):
                     .format(vol=volume))
                 volume.delete()
         except _BotoServerError as err:
-            logging.debug('{0}'.format(_format_exc()))
+            logging.debug(_format_exc())
             logging.info('{0} in {1}'.format(err, zone))
             continue
         else:
@@ -703,7 +703,7 @@ def _get_vol_dev(vol, key_filename=None):
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device.replace('/dev/', '')
     natty_dev = attached_dev.replace('sd', 'xvd')
-    logger.debug('{0}'.format(_PrettyPrinter().pformat(env)))
+    logger.debug(_PrettyPrinter().pformat(env))
     inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
         if dev in inst_devices:
@@ -928,10 +928,11 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
     for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
         latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
+        args = src_region_name, latest_snap.id, dst_region_name
         try:
-            rsync_snapshot(src_region_name, latest_snap.id, dst_region_name)
+            rsync_snapshot(*args)
         except:
-            logger.info('{0}'.format(_format_exc()))
+            logger.exception('{1} rsync from {0} to {2} failed'.format(*args))
 
 
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
