@@ -1,3 +1,9 @@
+Version 2011.07.26.1
+--------------------
+
+Added logging to file with rotation. Note: logging to a single file from
+multiple processes is not supported.
+
 Version 2011.07.24.1
 --------------------
 

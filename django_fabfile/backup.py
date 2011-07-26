@@ -40,7 +40,7 @@ from os.path import (
     splitext as _splitext)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
-from re import compile as _compile, match as _match
+from re import compile as _compile
 from string import lowercase
 from time import sleep as _sleep
 from traceback import format_exc as _format_exc
@@ -83,9 +83,9 @@ _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
-LOG_FILENAME = 'log_rotating_file.out'
+LOG_FILENAME = __name__ + '.log'
 
-logger = logging.getLogger('Logger')
+logger = logging.getLogger(__name__)
 
 if debug:
     logger.setLevel(logging.DEBUG)
