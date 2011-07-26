@@ -3,11 +3,28 @@
 Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
-All other options will be taken from ./fabfile.cfg file.
+All other options will be taken from ./fabfile.cfg file - copy-paste it
+from `django_fabfile/fabfile.cfg.def`.
 
-Commands presented to user (i.e. functions without preceeding
-underscore) should guess region by beginning if its name using
-`_get_region_by_name()`.
+USAGE:
+------
+
+  1. For backup creation you must specify instance_id and region in
+  [main] section. To create snapshot of mounted volume, run:
+          fab -f backup.py backup_instance
+  2. To purge old snapshots you must specify # of snapshots to save in
+  [mount_backups], specify instance_id and region in [main] section.
+  Then run:
+          fab -f backup.py trim_snapshots
+  3. To mount backup specify needed values in [mount_backups] section of
+  fabfile.cfg, specify instance_id and region in [main] section. Then run:
+          fab -f backup.py mount_snapshot
+  4. To backup all instances in all regions, which tagged with some tag
+  ('Earmarking':'production' for example), add this tags to [main]
+  section of fabfile.cfg and run:
+          fab -f backup.py backup_instances_by_regions
+  5. To purge old snapshots in all regions, run:
+          fab -f backup.py trim_snapshots_for_regions
 '''
 import logging
 import logging.handlers
@@ -17,7 +34,6 @@ from ConfigParser import ConfigParser as _ConfigParser
 from contextlib import contextmanager as _contextmanager
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
-from operator import attrgetter as _attrgetter
 from os import chmod as _chmod, remove as _remove
 from os.path import (
     exists as _exists, realpath as _realpath, split as _split,
@@ -39,21 +55,17 @@ from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
 from fabric.api import env, prompt, put, sudo
 
+from django_fabfile.utils import _get_region_by_name
+
 
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
-for reg in _regions():
-    if not config.has_section(reg.name):
-        config.add_section(reg.name)
-        with open(config_file, 'w') as f_p:
-            config.write(f_p)
 
 debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('DEFAULT', 'username')
 ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
 architecture = config.get('DEFAULT', 'architecture')
-aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
 ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
 ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
 ami_ptrn_with_release_date = config.get('DEFAULT',
@@ -224,23 +236,6 @@ def _dumps_resources(res_dict={}, res_list=[]):
     for res in res_list:
         res_dict.update(dict([unicode(res).split(':')]))
     return _dumps(res_dict)
-
-
-def _get_latest_aki(conn, architecture):
-    kernels = conn.get_all_images(filters={
-        'image-type': 'kernel',
-        'architecture': architecture,
-        'owner-id': ubuntu_aws_account,
-        'name': aki_ptrn})
-    return sorted(kernels, key=_attrgetter('name'))[-1]
-
-
-def _get_region_by_name(region_name):
-    """Allow to specify region name fuzzyly."""
-    matched = [reg for reg in _regions() if _match(region_name, reg.name)]
-    assert len(matched) > 0, 'No region matches {0}'.format(region_name)
-    assert len(matched) == 1, 'Several regions matches {0}'.format(region_name)
-    return matched[0]
 
 
 def _get_inst_by_id(region, instance_id):
@@ -579,7 +574,8 @@ def trim_snapshots(region_name=None, dry_run=False):
     region = _get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
-        logger.info('{0}'.format(reg))
+        logger.info('Processing {0}'.format(reg))
+        _trim_snapshots(reg)
 
 
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
@@ -735,6 +731,8 @@ def _mount_volume(vol, key_filename=None, mkfs=False):
     _wait_for_sudo('mkdir {0}'.format(mountpoint))
     if mkfs:
         sudo('mkfs.ext3 {dev}'.format(dev=dev))
+    """Add disk label for normal boot on created volume"""
+    sudo('e2label {dev} uec-rootfs'.format(dev=dev))
     sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
     if mkfs:
         sudo('chown -R {user}:{user} {mnt}'.format(user=username,
@@ -812,7 +810,12 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
     put(dst_key_file, '.ssh/', mirror_local_mode=True)
     dst_key_filename = _split(dst_key_file)[1]
     cmd = ('rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no" '
-           '-a --delete {src_mnt}/ root@{rhost}:{dst_mnt}')
+           '-aHAXzP --delete --exclude /root/.bash_history '
+           '--exclude /home/*/.bash_history --exclude /etc/ssh/ssh_host_* '
+           '--exclude /etc/ssh/moduli '
+           '--exclude /etc/udev/rules.d/*persistent-net.rules '
+           '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
+           '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
     sudo(cmd.format(rhost=dst_inst.public_dns_name, key_file=dst_key_filename,
                     src_mnt=src_mnt, dst_mnt=dst_mnt))
     env.update({'host_string': dst_inst.public_dns_name,
@@ -949,10 +952,11 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         'Select security group')
     _wait_for(image, ['state'], 'available')
     reservation = image.run(
-        key_name=config.get(conn.region.name, 'key_pair'),
-        security_groups=[_security_groups, ],
-        instance_type=inst_type,
-        kernel_id=_get_latest_aki(conn, image.architecture).id)
+        key_name = config.get(conn.region.name, 'key_pair'),
+        security_groups = [_security_groups, ],
+        instance_type = inst_type,
+        #Kernel workaround, not tested with natty
+        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
     _clone_tags(image, new_instance)
@@ -984,6 +988,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     # setup for building an EBS boot snapshot"
     ebs = _EBSBlockDeviceType()
     ebs.snapshot_id = snap_id
+    ebs.delete_on_termination = True
     block_map = _BlockDeviceMapping()
     block_map[root_dev] = ebs
 
@@ -991,6 +996,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
+    _wait_for(snap, ['status', ], 'completed')
     result = conn.register_image(
         name=name,
         description=snap.description,
@@ -1006,3 +1012,40 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         launch_instance_from_ami(region, image.id, inst_type=inst_type)
+
+
+def modify_kernel(region, instance_id):
+    """
+    Modify old kernel for stopped instance
+    (needed for make pv-grub working)
+    NOTICE: install grub-legacy-ec2 and upgrades before run this.
+    region
+        specify instance region;
+    instance_id
+        specify instance id for kernel change
+    Kernels list:
+        ap-southeast-1      x86_64  aki-11d5aa43
+        ap-southeast-1  i386    aki-13d5aa41
+        eu-west-1       x86_64  aki-4feec43b
+        eu-west-1       i386    aki-4deec439
+        us-east-1       x86_64  aki-427d952b
+        us-east-1       i386    aki-407d9529
+        us-west-1       x86_64  aki-9ba0f1de
+        us-west-1       i386    aki-99a0f1dc
+    """
+    key_filename = config.get(region, 'key_filename')
+    instance = _get_inst_by_id(region, instance_id)
+    env.update({
+        'host_string': instance.public_dns_name,
+        'key_filename': key_filename,
+        'load_known_hosts': False,
+        'user': username,
+    })
+    sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
+         'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
+         'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
+    kernel = config.get(region, 'kernel'+instance.architecture)
+    instance.stop()
+    _wait_for(instance, ['state',], 'stopped')
+    instance.modify_attribute('kernel', kernel)
+    instance.start()

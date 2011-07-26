@@ -1,3 +1,33 @@
+Version 2011.07.24.1
+--------------------
+
+Added configuration option `username` in new `odesk` section.
+
+Version 2011.07.21.1
+--------------------
+
+Added `django_fabfile.switchdb` module with commands for switching current
+primary DB server.
+
+Version 2011.07.18.1
+--------------------
+
+Added workaround with kernels for AMI creation to fix problems at instance boot
+stage.
+
+Fixed wrongly removed statement in `django_fabfile.backup.trim_snapshots`.
+
+Version 2011.07.16.2
+--------------------
+
+Added `django_fabfile.backup.modify_kernel` command for make pv-grub working.
+
+Version 2011.07.16.1
+--------------------
+
+Enabled volume deletion after termination for AMI, created by
+`django_fabfile.backup.create_ami`.
+
 Version 2011.06.28.1
 --------------------
 
