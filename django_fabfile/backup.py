@@ -28,6 +28,7 @@ USAGE:
 '''
 import logging
 import logging.handlers
+import sys
 
 from datetime import timedelta as _timedelta, datetime
 from ConfigParser import ConfigParser as _ConfigParser
@@ -62,7 +63,6 @@ config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
 
-debug = config.getboolean('DEFAULT', 'debug')
 username = config.get('DEFAULT', 'username')
 ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
 architecture = config.get('DEFAULT', 'architecture')
@@ -87,15 +87,30 @@ LOG_FILENAME = __name__ + '.log'
 
 logger = logging.getLogger(__name__)
 
-if debug:
+if config.getboolean('DEFAULT', 'debug'):
     logger.setLevel(logging.DEBUG)
 else:
     logger.setLevel(logging.INFO)
 
-# Add the log message handler to the logger
+if config.getboolean('DEFAULT', 'log_to_file'):
+    handler = logging.handlers.TimedRotatingFileHandler(
+        LOG_FILENAME, 'midnight', backupCount=30)
+
+    class StreamLogger():
+
+        def __init__(self, level=logging.INFO):
+            self.logger = logging.getLogger(__name__)
+            self.level = level
+
+        def write(self, row):
+            self.logger.log(self.level, row)
+    # Redirect Fabric output to log file.
+    sys.stdout = StreamLogger()
+    sys.stderr = StreamLogger(level=logging.ERROR)
+else:
+    handler = logging.StreamHandler(sys.stdout)
+
 fmt = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFORMAT)
-handler = logging.handlers.TimedRotatingFileHandler(
-    LOG_FILENAME, 'midnight', backupCount=30)
 handler.setFormatter(fmt)
 logger.addHandler(handler)
 
