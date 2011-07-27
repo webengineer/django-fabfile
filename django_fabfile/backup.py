@@ -94,8 +94,8 @@ else:
 
 # Add the log message handler to the logger
 fmt = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFORMAT)
-handler = logging.handlers.RotatingFileHandler(
-    LOG_FILENAME, maxBytes=512000, backupCount=30)
+handler = logging.handlers.TimedRotatingFileHandler(
+    LOG_FILENAME, 'midnight', backupCount=30)
 handler.setFormatter(fmt)
 logger.addHandler(handler)
 
