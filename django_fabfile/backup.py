@@ -37,7 +37,7 @@ from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
 from os import chmod as _chmod, remove as _remove
 from os.path import (
-    exists as _exists, realpath as _realpath, split as _split,
+    exists as _os_exists, realpath as _realpath, split as _split,
     splitext as _splitext)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
@@ -55,6 +55,7 @@ from boto.ec2.blockdevicemapping import (
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
 from fabric.api import env, prompt, put, sudo
+from fabric.contrib.files import exists as _fabric_exists
 
 from django_fabfile.utils import _get_region_by_name
 
@@ -103,7 +104,10 @@ if config.getboolean('DEFAULT', 'log_to_file'):
             self.level = level
 
         def write(self, row):
-            self.logger.log(self.level, row)
+            self.logger.log(self.level, row.strip())
+
+        def flush(self):
+            pass
     # Redirect Fabric output to log file.
     sys.stdout = StreamLogger()
     sys.stderr = StreamLogger(level=logging.ERROR)
@@ -225,7 +229,8 @@ class _WaitForProper(object):
 
 _wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
                                 pause=ssh_timeout_interval)(sudo)
-
+_wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
+                                  pause=ssh_timeout_interval)(_fabric_exists)
 
 def _clone_tags(src_res, dst_res):
     for tag in src_res.tags:
@@ -716,13 +721,12 @@ def _get_vol_dev(vol, key_filename=None):
     key_filename = key_filename or config.get(vol.region.name, 'key_filename')
     env.update({'host_string': inst.public_dns_name,
                 'key_filename': key_filename})
-    attached_dev = vol.attach_data.device.replace('/dev/', '')
+    attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
     logger.debug(_PrettyPrinter().pformat(env))
-    inst_devices = _wait_for_sudo('ls /dev').split()
     for dev in [attached_dev, natty_dev]:
-        if dev in inst_devices:
-            return '/dev/{0}'.format(dev)
+        if _wait_for_exists(dev):
+            return dev
 
 
 def _mount_volume(vol, key_filename=None, mkfs=False):
@@ -764,7 +768,7 @@ def _config_temp_ssh(conn):
         conn.delete_key_pair(config_name)
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
-    if _exists(key_filename):
+    if _os_exists(key_filename):
         _remove(key_filename)
     key_pair.save('./')
     _chmod(key_filename, 0600)
@@ -825,7 +829,7 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
     put(dst_key_file, '.ssh/', mirror_local_mode=True)
     dst_key_filename = _split(dst_key_file)[1]
     cmd = ('rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no" '
-           '-aHAXzP --delete --exclude /root/.bash_history '
+           '-aHAXz --delete --exclude /root/.bash_history '
            '--exclude /home/*/.bash_history --exclude /etc/ssh/ssh_host_* '
            '--exclude /etc/ssh/moduli '
            '--exclude /etc/udev/rules.d/*persistent-net.rules '
@@ -1055,7 +1059,6 @@ def modify_kernel(region, instance_id):
         'host_string': instance.public_dns_name,
         'key_filename': key_filename,
         'load_known_hosts': False,
-        'user': username,
     })
     sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
          'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
