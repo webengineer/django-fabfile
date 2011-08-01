@@ -99,7 +99,9 @@ if log_to_file:
             self.level = level
 
         def write(self, row):
-            self.logger.log(self.level, row.strip())
+            row = row.strip()
+            if row:
+                self.logger.log(self.level, row)
 
         def flush(self):
             pass
