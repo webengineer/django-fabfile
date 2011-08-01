@@ -31,7 +31,8 @@ import logging.handlers
 import sys
 
 from datetime import timedelta as _timedelta, datetime
-from ConfigParser import ConfigParser as _ConfigParser
+from ConfigParser import (ConfigParser as _ConfigParser, NoOptionError as
+                          _NoOptionError)
 from contextlib import contextmanager as _contextmanager, nested as _nested
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
@@ -62,23 +63,17 @@ from django_fabfile.utils import _get_region_by_name
 config_file = 'fabfile.cfg'
 config = _ConfigParser()
 config.read(config_file)
+try:
+    username = config.get('DEFAULT', 'username')
+    debug = config.getboolean('DEFAULT', 'debug')
+    log_to_file = config.getboolean('DEFAULT', 'log_to_file')
+except _NoOptionError:
+    username = 'ubuntu'
+    debug = log_to_file = False
+else:
+    env.update({'user': username})
 
-username = config.get('DEFAULT', 'username')
-ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
-architecture = config.get('DEFAULT', 'architecture')
-ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
-ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
-ami_ptrn_with_release_date = config.get('DEFAULT',
-                                        'ami_ptrn_with_release_date')
-ami_regexp = config.get('DEFAULT', 'ami_regexp')
-ssh_grp = config.get('DEFAULT', 'ssh_security_group')
-ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
-ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
-
-env.update({'disable_known_hosts': True, 'user': username})
-
-_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
-
+env.update({'disable_known_hosts': True})
 
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
@@ -87,13 +82,13 @@ LOG_FILENAME = __name__ + '.log'
 
 logger = logging.getLogger(__name__)
 
-if config.getboolean('DEFAULT', 'debug'):
+if debug:
     logger.setLevel(logging.DEBUG)
     output['debug'] = True
 else:
     logger.setLevel(logging.INFO)
 
-if config.getboolean('DEFAULT', 'log_to_file'):
+if log_to_file:
     handler = logging.handlers.TimedRotatingFileHandler(
         LOG_FILENAME, 'midnight', backupCount=30)
 
@@ -117,6 +112,9 @@ else:
 fmt = logging.Formatter(LOG_FORMAT, datefmt=LOG_DATEFORMAT)
 handler.setFormatter(fmt)
 logger.addHandler(handler)
+
+
+_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _prompt_to_select(choices, query='Select from', paging=False):
@@ -227,11 +225,6 @@ class _WaitForProper(object):
                     break
         return wrapper
 
-_wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
-                                pause=ssh_timeout_interval)(sudo)
-_wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
-                                  pause=ssh_timeout_interval)(exists)
-
 
 def _clone_tags(src_res, dst_res):
     for tag in src_res.tags:
@@ -294,6 +287,10 @@ def _get_all_snapshots(region=None, id_only=False):
 
 
 def update_volumes_tags(filters=None):
+    """Clone tags from instances to volumes.
+
+    filters
+        apply optional filtering for the `get_all_instances`."""
     for region in _regions():
         reservations = region.connect().get_all_instances(filters=filters)
         for res in reservations:
@@ -627,25 +624,31 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     region = _get_region_by_name(region_name)
     conn = region.connect()
 
+    ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
+    architecture = config.get('DEFAULT', 'architecture')
+    ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
     filters = {'owner_id': ubuntu_aws_account, 'architecture': architecture,
              'name': ami_ptrn, 'image_type': 'machine',
              'root_device_type': 'ebs'}
     images = conn.get_all_images(filters=filters)
 
     # Filtering by latest version.
-    ptrn = _compile(ami_regexp)
+    ptrn = _compile(config.get('DEFAULT', 'ami_regexp'))
     versions = set([ptrn.search(img.name).group('version') for img in images])
 
     def complement(year_month):
         return '0' + year_month if len(year_month) == 4 else year_month
 
     latest_version = sorted(set(filter(complement, versions)))[-1]  # XXX Y3K.
+    ami_ptrn_with_version = config.get('DEFAULT', 'ami_ptrn_with_version')
     name_with_version = ami_ptrn_with_version.format(version=latest_version)
     filters.update({'name': name_with_version})
     images = conn.get_all_images(filters=filters)
     # Filtering by latest release date.
     dates = set([ptrn.search(img.name).group('released_at') for img in images])
     latest_date = sorted(set(dates))[-1]
+    ami_ptrn_with_release_date = config.get('DEFAULT',
+                                            'ami_ptrn_with_release_date')
     name_with_version_and_release = ami_ptrn_with_release_date.format(
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
@@ -655,6 +658,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         .format(image=image, zone=zone))
 
     key_pair = key_pair or config.get(region.name, 'key_pair')
+    ssh_grp = config.get('DEFAULT', 'ssh_security_group')
     reservation = image.run(
         key_name=key_pair, instance_type='t1.micro', placement=zone,
         security_groups=security_groups or [ssh_grp])
@@ -727,7 +731,7 @@ def _mount_volume(vol, mkfs=False):
         sudo('e2label {dev} uec-rootfs'.format(dev=dev))
         sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
         if mkfs:
-            sudo('chown -R {user}:{user} {mnt}'.format(user=username,
+            sudo('chown -R {user}:{user} {mnt}'.format(user=env.user,
                                                        mnt=mountpoint))
     return mountpoint
 
@@ -796,6 +800,9 @@ def _get_vol_dev(vol):
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
     logger.debug(env, output)
+    _wait_for_exists = _WaitForProper(
+        attempts=config.getint('DEFAULT', 'ssh_timeout_attempts'),
+        pause=config.getint('DEFAULT', 'ssh_timeout_interval'))(exists)
     for dev in [attached_dev, natty_dev]:
         if _wait_for_exists(dev):
             return dev
@@ -844,7 +851,7 @@ def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
                      'altered by system.')
         key_file = config.get(region.name, 'key_filename')
         inst = _get_inst_by_id(region, vol.attach_data.instance_id)
-        logger.info(info.format(inst=inst, user=username, key=key_file,
+        logger.info(info.format(inst=inst, user=env.user, key=key_file,
             device=vol.attach_data.device, mountpoint=mountpoint))
 
         info = ('\nEnter FINISHED if you are finished looking at the '
@@ -968,7 +975,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
             dst_dev = _get_avail_dev(dst_inst)
             dst_vol.attach(dst_inst.id, dst_dev)
             dst_mnt = _mount_volume(dst_vol, mkfs=True)
-            with _attach_snapshot(src_snap, inst=src_inst) as src_vol, src_mnt:
+            with _attach_snapshot(src_snap, inst=src_inst) as (src_vol,
+                                                               src_mnt):
                 src_inst = src_vol.attach_data.instance_id
                 _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
             _update_snap(src_vol, src_mnt, dst_vol, dst_mnt)
@@ -1053,7 +1061,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
     key_file = config.get(conn.region.name, 'key_filename')
-    logger.info(info.format(inst=new_instance, user=username, key=key_file))
+    logger.info(info.format(inst=new_instance, user=env.user, key=key_file))
 
 
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',

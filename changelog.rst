@@ -1,3 +1,9 @@
+Version 2011.08.01.2
+--------------------
+
+Added `django_fabfile.backup.update_volumes_tags` for cloning tags from
+instances.
+
 Version 2011.08.01.1
 --------------------
 
