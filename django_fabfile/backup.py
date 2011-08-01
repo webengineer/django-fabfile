@@ -32,13 +32,11 @@ import sys
 
 from datetime import timedelta as _timedelta, datetime
 from ConfigParser import ConfigParser as _ConfigParser
-from contextlib import contextmanager as _contextmanager
+from contextlib import contextmanager as _contextmanager, nested as _nested
 from itertools import groupby as _groupby
 from json import dumps as _dumps, loads as _loads
 from os import chmod as _chmod, remove as _remove
-from os.path import (
-    exists as _os_exists, realpath as _realpath, split as _split,
-    splitext as _splitext)
+from os.path import (realpath as _realpath, split as _split)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
 from re import compile as _compile
@@ -54,8 +52,9 @@ from boto.ec2.blockdevicemapping import (
     EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, prompt, put, sudo
-from fabric.contrib.files import exists as _fabric_exists
+from fabric.api import env, local, prompt, put, settings, sudo
+from fabric.contrib.files import append, exists
+from fabric.state import output
 
 from django_fabfile.utils import _get_region_by_name
 
@@ -83,13 +82,14 @@ _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
-LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S'
+LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S %Z'
 LOG_FILENAME = __name__ + '.log'
 
 logger = logging.getLogger(__name__)
 
 if config.getboolean('DEFAULT', 'debug'):
     logger.setLevel(logging.DEBUG)
+    output['debug'] = True
 else:
     logger.setLevel(logging.INFO)
 
@@ -217,7 +217,7 @@ class _WaitForProper(object):
                     return func(*args, **kwargs)
                 except BaseException as err:
                     logger.debug(_format_exc())
-                    logger.info(repr(err))
+                    logger.error(repr(err))
 
                     if attempts > 0:
                         logger.info('waiting next {0} sec ({1} times left)'
@@ -230,7 +230,8 @@ class _WaitForProper(object):
 _wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
                                 pause=ssh_timeout_interval)(sudo)
 _wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
-                                  pause=ssh_timeout_interval)(_fabric_exists)
+                                  pause=ssh_timeout_interval)(exists)
+
 
 def _clone_tags(src_res, dst_res):
     for tag in src_res.tags:
@@ -259,7 +260,7 @@ def _dumps_resources(res_dict={}, res_list=[]):
 
 
 def _get_inst_by_id(region, instance_id):
-    conn = _get_region_by_name(region).connect()
+    conn = region.connect()
     res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
@@ -292,6 +293,17 @@ def _get_all_snapshots(region=None, id_only=False):
             yield snap.id if id_only else snap
 
 
+def update_volumes_tags(filters=None):
+    for region in _regions():
+        reservations = region.connect().get_all_instances(filters=filters)
+        for res in reservations:
+            inst = res.instances[0]
+            for bdm in inst.block_device_mapping.keys():
+                vol_id = inst.block_device_mapping[bdm].volume_id
+                vol = inst.connection.get_all_volumes([vol_id])[0]
+                _clone_tags(inst, vol)
+
+
 def modify_instance_termination(region, instance_id):
     """Mark production instnaces as uneligible for termination.
 
@@ -303,7 +315,7 @@ def modify_instance_termination(region, instance_id):
     You must change value of preconfigured tag_name and run this command
     before terminating production instance via API."""
     conn = _get_region_by_name(region).connect()
-    inst = _get_inst_by_id(conn.region.name, instance_id)
+    inst = _get_inst_by_id(conn.region, instance_id)
     prod_tag = config.get(conn.region.name, 'tag_name')
     prod_val = config.get(conn.region.name, 'tag_value')
     inst_tag_val = inst.tags.get(prod_tag)
@@ -370,7 +382,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Either instance_id or instance should be specified')
     region = _get_region_by_name(region_name)
     if instance_id:
-        instance = _get_inst_by_id(region.name, instance_id)
+        instance = _get_inst_by_id(region, instance_id)
     vol_id = instance.block_device_mapping[dev].volume_id
     description = _dumps_resources({
         'Volume': vol_id,
@@ -405,7 +417,7 @@ def backup_instance(region_name, instance_id=None, instance=None,
         'instance should be specified')
     region = _get_region_by_name(region_name)
     if instance_id:
-        instance = _get_inst_by_id(region.name, instance_id)
+        instance = _get_inst_by_id(region, instance_id)
     snapshots = []  # NOTE Fabric doesn't supports generators.
     for dev in instance.block_device_mapping:
         snapshots.append(create_snapshot(
@@ -606,13 +618,11 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 
     region_name
         by default will be created in the us-east-1 region;
-    zone
+    zone_name
         string-formatted name. By default will be used latest zone;
     key_pair
         name of key_pair to be granted access. Will be fetched from
         config by default, may be configured per region."""
-
-    # TODO Allow only zone_name to be passed.
 
     region = _get_region_by_name(region_name)
     conn = region.connect()
@@ -645,8 +655,9 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         .format(image=image, zone=zone))
 
     key_pair = key_pair or config.get(region.name, 'key_pair')
-    reservation = image.run(key_name=key_pair, instance_type='t1.micro',
-                            placement=zone, security_groups=security_groups)
+    reservation = image.run(
+        key_name=key_pair, instance_type='t1.micro', placement=zone,
+        security_groups=security_groups or [ssh_grp])
     assert len(reservation.instances) == 1, 'More than 1 instances created'
     inst = reservation.instances[0]
     _wait_for(inst, ['state', ], 'running')
@@ -656,123 +667,148 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 
 
 @_contextmanager
-def _create_temp_inst(zone, key_pair=None, security_groups=None):
-    inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
-                           security_groups=security_groups)
-    inst.add_tag('Earmarking', 'temporary')
+def _create_temp_inst(region=None, zone=None, key_pair=None,
+                      security_groups=None, synchronously=False):
+    assert bool(region) ^ bool(zone), ('Either region or zone should be '
+                                       'specified')
+
+    def _create_inst_in_zone(zone, key_pair, sec_grps):
+        inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
+                               security_groups=sec_grps)
+        inst.add_tag(config.get(zone.region.name, 'tag_name'), 'temporary')
+        return inst
+
+    if zone:
+        inst = _create_inst_in_zone(zone, key_pair, security_groups)
+    else:
+        for zone in region.connect().get_all_zones():
+            try:
+                inst = _create_inst_in_zone(zone, key_pair, security_groups)
+            except _BotoServerError as err:
+                logging.debug(_format_exc())
+                logging.error('{0} in {1}'.format(err, zone))
+                continue
+            else:
+                break
     try:
         yield inst
     finally:
         logger.info('Terminating the {0} in {0.region}...'.format(inst))
         inst.terminate()
-        _wait_for(inst, ['state'], 'terminated')
+        if synchronously:
+            _wait_for(inst, ['state'], 'terminated')
 
 
-def _get_avail_dev(instance):
+def _get_avail_dev(inst):
     """Return next unused device name."""
     chars = lowercase
-    for dev in instance.block_device_mapping:
+    for dev in inst.block_device_mapping:
         chars = chars.replace(dev[-2], '')
     return '/dev/sd{0}1'.format(chars[0])
 
 
+def _mount_volume(vol, mkfs=False):
+
+    """Mount the device by SSH. Return mountpoint on success.
+
+    vol
+        volume to be mounted on the instance it is attached to."""
+
+    vol.update()
+    inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    key_filename = config.get(vol.region.name, 'key_filename')
+    with settings(host_string=inst.public_dns_name, key_filename=key_filename):
+        dev = _get_vol_dev(vol)
+        mountpoint = dev.replace('/dev/', '/media/')
+        sudo('mkdir -p {0}'.format(mountpoint))
+        if mkfs:
+            sudo('mkfs.ext3 {dev}'.format(dev=dev))
+        """Add disk label for normal boot on created volume"""
+        sudo('e2label {dev} uec-rootfs'.format(dev=dev))
+        sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
+        if mkfs:
+            sudo('chown -R {user}:{user} {mnt}'.format(user=username,
+                                                       mnt=mountpoint))
+    return mountpoint
+
+
 @_contextmanager
-def _attach_snapshot(snap, key_pair=None, security_groups=None):
-    """Create temporary instance and attach the snapshot."""
+def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
+
+    """Attach `snap` to `inst` or to new temporary instance.
+
+    Yield volume, created from the `snap` and its mountpoint.
+
+    Create temporary instance if `inst` not provided. Provide access to
+    newly created temporary instance for `key_pair` and with
+    `security_groups`."""
+
     _wait_for(snap, ['status', ], 'completed')
-    conn = snap.region.connect()
-    for zone in conn.get_all_zones():
+
+    @_contextmanager
+    def _attach_snap_to_inst(inst, snap):
+        conn = snap.region.connect()
+        _wait_for(inst, ['state'], 'running')
         try:
-            volume = conn.create_volume(snap.volume_size, zone, snap)
-            _clone_tags(snap, volume)
-            logger.debug('Tags cloned from {0} to {1}'.format(snap, volume))
-            try:
-                with _create_temp_inst(
-                    zone, key_pair=key_pair, security_groups=security_groups) \
-                    as inst:
-                    dev_name = _get_avail_dev(inst)
-                    logger.debug('Got avail {0} from {1}'
-                        .format(dev_name, inst))
-                    volume.attach(inst.id, dev_name)
-                    logger.debug('Attached {0} to {1}'
-                        .format(volume, inst))
-                    volume.update()
-                    _wait_for(volume, ['attach_data', 'status'], 'attached')
-                    yield volume
-            finally:
-                _wait_for(volume, ['status', ], 'available')
-                logger.info('Deleting {vol} in {vol.region}...'
-                    .format(vol=volume))
-                volume.delete()
-        except _BotoServerError as err:
-            logging.debug(_format_exc())
-            logging.info('{0} in {1}'.format(err, zone))
-            continue
-        else:
-            break
+            vol = conn.create_volume(snap.volume_size, inst.placement, snap)
+            _clone_tags(snap, vol)
+            vol.add_tag(config.get(conn.region.name, 'tag_name'), 'temporary')
+            logger.debug('Tags cloned from {0} to {1}'.format(snap, vol))
+            dev_name = _get_avail_dev(inst)
+            logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
+            vol.attach(inst.id, dev_name)
+            logger.debug('Attached {0} to {1}'.format(vol, inst))
+            vol.update()
+            _wait_for(vol, ['attach_data', 'status'], 'attached')
+            mountpoint = _mount_volume(vol)
+            yield vol, mountpoint
+        finally:
+            key_filename = config.get(vol.region.name, 'key_filename')
+            with settings(host_string=inst.public_dns_name,
+                          key_filename=key_filename):
+                sudo('umount {0}'.format(mountpoint))
+            if vol.status != 'available':
+                vol.detach(force=True)
+            _wait_for(vol, ['status', ], 'available')
+            logger.info('Deleting {vol} in {vol.region}...'.format(vol=vol))
+            vol.delete()
+
+    if inst:
+        with _attach_snap_to_inst(inst, snap) as (vol, mountpoint):
+            yield vol, mountpoint
+    else:
+        with _create_temp_inst(snap.region, key_pair=key_pair,
+                               security_groups=security_groups) as inst:
+            with _attach_snap_to_inst(inst, snap) as (vol, mountpoint):
+                yield vol, mountpoint
 
 
-def _get_vol_dev(vol, key_filename=None):
+def _get_vol_dev(vol):
+    """Return volume representation as attached OS device."""
     if not vol.attach_data.instance_id:
         return
-    inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
+    inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
     if not inst.public_dns_name:    # The instance is down.
         return
-    key_filename = key_filename or config.get(vol.region.name, 'key_filename')
+    key_filename = config.get(vol.region.name, 'key_filename')
     env.update({'host_string': inst.public_dns_name,
                 'key_filename': key_filename})
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
-    logger.debug(_PrettyPrinter().pformat(env))
+    logger.debug(env, output)
     for dev in [attached_dev, natty_dev]:
         if _wait_for_exists(dev):
             return dev
 
 
-def _mount_volume(vol, key_filename=None, mkfs=False):
-
-    """Mount the device by SSH. Return mountpoint on success.
-
-    vol
-        volume to be mounted on the instance it is attached to;
-    key_filename
-        location of the private key to access instance, where `vol` is
-        mounted. Fetched from config by default."""
-
-    vol.update()
-    inst = _get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
-    key_filename = key_filename or config.get(vol.region.name, 'key_filename')
-
-    env.update({'host_string': inst.public_dns_name,
-                'key_filename': key_filename})
-    dev = _get_vol_dev(vol, key_filename)
-    mountpoint = dev.replace('/dev/', '/media/')
-    _wait_for_sudo('mkdir {0}'.format(mountpoint))
-    if mkfs:
-        sudo('mkfs.ext3 {dev}'.format(dev=dev))
-    """Add disk label for normal boot on created volume"""
-    sudo('e2label {dev} uec-rootfs'.format(dev=dev))
-    sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
-    if mkfs:
-        sudo('chown -R {user}:{user} {mnt}'.format(user=username,
-                                                   mnt=mountpoint))
-    return mountpoint
-
-
 @_contextmanager
 def _config_temp_ssh(conn):
-    config_name = '{region}-temp-ssh-{now}'.format(region=conn.region.name,
-                                                   now=_now())
-
-    if config_name in [k_p.name for k_p in conn.get_all_key_pairs()]:
-        conn.delete_key_pair(config_name)
+    config_name = '{region}-temp-ssh-{now}'.format(
+        region=conn.region.name, now=datetime.utcnow().isoformat())
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
-    if _os_exists(key_filename):
-        _remove(key_filename)
     key_pair.save('./')
     _chmod(key_filename, 0600)
-
     try:
         yield _realpath(key_filename)
     finally:
@@ -780,31 +816,34 @@ def _config_temp_ssh(conn):
         _remove(key_filename)
 
 
-def mount_snapshot(region_name=None, snap_id=None):
+def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
 
-    """Mount snapshot to temporary created instance.
+    """Mount snapshot to temporary created instance or `inst_id`.
 
     region_name
         snapshot location
-    snap_id."""
+    snap_id
+    inst_id
+        attach to existing instance. Will be created temporary if
+        None."""
 
     if not region_name or not snap_id:
         region_name, snap_id = _select_snapshot()
     region = _get_region_by_name(region_name)
     conn = region.connect()
+    inst = _get_inst_by_id(region, inst_id) if inst_id else None
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _attach_snapshot(snap, security_groups=[ssh_grp]) as vol:
-        mountpoint = _mount_volume(vol)
+    with _attach_snapshot(snap, inst) as (vol, mountpoint):
         if mountpoint:
             info += ('\nand browse snapshot, mounted at {mountpoint}.')
         else:
             info += ('\nand mount {device}. NOTE: device name may be '
                      'altered by system.')
         key_file = config.get(region.name, 'key_filename')
-        inst = _get_inst_by_id(region.name, vol.attach_data.instance_id)
+        inst = _get_inst_by_id(region, vol.attach_data.instance_id)
         logger.info(info.format(inst=inst, user=username, key=key_file,
             device=vol.attach_data.device, mountpoint=mountpoint))
 
@@ -814,57 +853,65 @@ def mount_snapshot(region_name=None, snap_id=None):
             pass
 
 
-def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt, dst_key_file):
-    """Run `rsync` against mountpoints.
-
-    dst_key_file
-        private key that will be used in src_inst to access dst_inst."""
-    env.update({'host_string': dst_inst.public_dns_name,
-                'key_filename': dst_key_file})
-    sudo('cp /root/.ssh/authorized_keys /root/.ssh/authorized_keys.bak')
-    sudo('cp .ssh/authorized_keys /root/.ssh/')
+def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
+    """Run `rsync` against mountpoints."""
     src_key_filename = config.get(src_inst.region.name, 'key_filename')
-    env.update({'host_string': src_inst.public_dns_name,
-                'key_filename': src_key_filename})
-    put(dst_key_file, '.ssh/', mirror_local_mode=True)
-    dst_key_filename = _split(dst_key_file)[1]
-    cmd = ('rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no" '
-           '-aHAXz --delete --exclude /root/.bash_history '
-           '--exclude /home/*/.bash_history --exclude /etc/ssh/ssh_host_* '
-           '--exclude /etc/ssh/moduli '
-           '--exclude /etc/udev/rules.d/*persistent-net.rules '
-           '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
-           '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
-    sudo(cmd.format(rhost=dst_inst.public_dns_name, key_file=dst_key_filename,
-                    src_mnt=src_mnt, dst_mnt=dst_mnt))
-    env.update({'host_string': dst_inst.public_dns_name,
-                'key_filename': dst_key_file})
-    sudo('mv /root/.ssh/authorized_keys.bak /root/.ssh/authorized_keys')
+    dst_key_filename = config.get(dst_inst.region.name, 'key_filename')
+    with _config_temp_ssh(dst_inst.connection) as key_file:
+        with settings(host_string=dst_inst.public_dns_name,
+                      key_filename=dst_key_filename):
+            sudo('cp /root/.ssh/authorized_keys '
+                 '/root/.ssh/authorized_keys.bak')
+            pub_key = local('ssh-keygen -y -f {0}'.format(key_file), True)
+            append('/root/.ssh/authorized_keys', pub_key, use_sudo=True)
+        with settings(host_string=src_inst.public_dns_name,
+                      key_filename=src_key_filename):
+            put(key_file, '.ssh/', mirror_local_mode=True)
+            dst_key_filename = _split(key_file)[1]
+            cmd = (
+                'rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no"'
+                ' -aHAXz --delete --exclude /root/.bash_history '
+                '--exclude /home/*/.bash_history --exclude /etc/ssh/moduli '
+                '--exclude /etc/ssh/ssh_host_* '
+                '--exclude /etc/udev/rules.d/*persistent-net.rules '
+                '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
+                '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
+            sudo(cmd.format(rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
+                            key_file=dst_key_filename, src_mnt=src_mnt))
+        with settings(host_string=dst_inst.public_dns_name,
+                      key_filename=dst_key_filename):
+            sudo('mv /root/.ssh/authorized_keys.bak '
+                 '/root/.ssh/authorized_keys')
 
 
-def _rsync_snap_to_vol(src_snap, dst_vol, dst_key_file, mkfs=False):
+def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
 
-    """Run `rsync` to update dst_vol from src_snap."""
+    """Create new snapshot with same description and tags.
 
-    with _attach_snapshot(src_snap, security_groups=[ssh_grp]) as src_vol:
-        src_mnt = _mount_volume(src_vol)
-        dst_mnt = _mount_volume(dst_vol, dst_key_file, mkfs=mkfs)
-        src_inst = _get_inst_by_id(src_vol.region.name,
-                                   src_vol.attach_data.instance_id)
-        dst_inst = _get_inst_by_id(dst_vol.region.name,
-                                   dst_vol.attach_data.instance_id)
-        _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt,
-                           dst_key_file)
+    If there are snapshots in `dst_region_name` with the same volume in
+    description as specified in the source `snapshot_id`, then the
+    latest snap in destination region will be deleted."""
 
-
-def _create_fresh_snap(dst_vol, src_snap):
-    """Create new snapshot with same description and tags."""
+    src_inst = _get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
+    dst_inst = _get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
+    _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
+    if dst_vol.snapshot_id:
+        old_snap = dst_vol.connection.get_all_snapshots(
+            [dst_vol.snapshot_id])[0]
+    else:
+        old_snap = None
+    src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     new_dst_snap = dst_vol.create_snapshot(src_snap.description)
     _clone_tags(src_snap, new_dst_snap)
     _wait_for(new_dst_snap, ['status', ], 'completed')
+    if old_snap:
+        logger.info('Deleting previous {0} in {1}'.format(old_snap,
+                                                          dst_vol.region))
+        old_snap.delete()
 
 
-def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
+def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
+                   src_inst=None, dst_inst=None):
 
     """Duplicate the snapshot into dst_region.
 
@@ -873,10 +920,12 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
         `ap-southeast-1` will be recognized in `ap-south` or even
         `ap-s`;
     snapshot_id
-        snapshot to duplicate."""
+        snapshot to duplicate;
+    src_inst, dst_inst
+        will be used instead of creating new for temporary."""
+
     src_conn = _get_region_by_name(src_region_name).connect()
-    dst_reg = _get_region_by_name(dst_region_name)
-    dst_conn = dst_reg.connect()
+    dst_conn = _get_region_by_name(dst_region_name).connect()
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
 
     info = 'Transmitting {snap} {snap.description}'
@@ -889,33 +938,48 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name):
     snaps = dst_conn.get_all_snapshots(owner='self')
     src_vol = _get_snap_vol(src_snap)
     dst_snaps = [snp for snp in snaps if _get_snap_vol(snp) == src_vol]
-
     dst_snap = sorted(dst_snaps, key=_get_snap_time)[-1] if dst_snaps else None
 
     if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
-        info = ' {src} is not newer than {dst} {dst.description} in {dst_reg}'
-        logger.info(info.format(src=src_snap, dst=dst_snap, dst_reg=dst_reg))
+        info = '{src} is not newer than {dst} {dst.description} in {dst_reg}'
+        logger.info(info.format(src=src_snap, dst=dst_snap,
+                                dst_reg=dst_conn.region))
         return
 
-    with _config_temp_ssh(dst_conn) as key_file:
-        key_pair = _splitext(_split(key_file)[1])[0]
+    for inst in src_inst, dst_inst:
+        if inst:
+            logger.debug('Rebooting {0} in {0.region} '
+                         'to refresh attachments'.format(inst))
+            inst.reboot()
 
-        if dst_snap:
-            with _attach_snapshot(dst_snap, key_pair, [ssh_grp]) as dst_vol:
-                _rsync_snap_to_vol(src_snap, dst_vol, key_file)
-                _create_fresh_snap(dst_vol, src_snap)
-            dst_snap.delete()
-        else:
-            dst_zn = dst_conn.get_all_zones()[-1]     # Just latest zone.
-            with _create_temp_inst(dst_zn, key_pair, [ssh_grp]) as dst_inst:
-                dst_vol = dst_conn.create_volume(src_snap.volume_size, dst_zn)
-                _clone_tags(src_snap, dst_vol)
-                dst_dev = _get_avail_dev(dst_inst)
-                dst_vol.attach(dst_inst.id, dst_dev)
-                _rsync_snap_to_vol(src_snap, dst_vol, key_file, mkfs=True)
-                _create_fresh_snap(dst_vol, src_snap)
+    if dst_snap:
+        with _nested(_attach_snapshot(src_snap, inst=src_inst),
+                     _attach_snapshot(dst_snap, inst=dst_inst)) as (
+            (src_vol, src_mnt), (dst_vol, dst_mnt)):
+            _update_snap(src_vol, src_mnt, dst_vol, dst_mnt)
+    else:
+
+        def _initial_snap_rsync(src_snap, src_inst, dst_inst):
+            dst_vol = dst_conn.create_volume(src_snap.volume_size,
+                                             dst_inst.placement)
+            _clone_tags(src_snap, dst_vol)
+            dst_vol.add_tag(config.get(dst_conn.region.name, 'tag_name'),
+                            'temporary')
+            dst_dev = _get_avail_dev(dst_inst)
+            dst_vol.attach(dst_inst.id, dst_dev)
+            dst_mnt = _mount_volume(dst_vol, mkfs=True)
+            with _attach_snapshot(src_snap, inst=src_inst) as src_vol, src_mnt:
+                src_inst = src_vol.attach_data.instance_id
+                _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
+            _update_snap(src_vol, src_mnt, dst_vol, dst_mnt)
             _wait_for(dst_vol, ['status', ], 'available')
             dst_vol.delete()
+
+        if dst_inst:
+            _initial_snap_rsync(src_snap, src_inst, dst_inst)
+        else:
+            with _create_temp_inst(dst_conn.region) as dst_inst:
+                _initial_snap_rsync(src_snap, src_inst, dst_inst)
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
@@ -932,6 +996,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     native
         sync only snapshots, created in the src_region_name."""
     src_region = _get_region_by_name(src_region_name)
+    dst_region = _get_region_by_name(dst_region_name)
     conn = src_region.connect()
     tag_name = tag_name or config.get(src_region.name, 'tag_name')
     tag_value = tag_value or config.get(src_region.name, 'tag_value')
@@ -945,13 +1010,17 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             return _get_descr_attr(snap, 'Region') == region.name
         snaps = [snp for snp in snaps if _is_native(snp, src_region)]
     snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
-    for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
-        latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
-        args = src_region_name, latest_snap.id, dst_region_name
-        try:
-            rsync_snapshot(*args)
-        except:
-            logger.exception('{1} rsync from {0} to {2} failed'.format(*args))
+    with _nested(_create_temp_inst(src_region),
+                 _create_temp_inst(dst_region)) as (src_inst, dst_inst):
+        for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
+            latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
+            args = (src_region_name, latest_snap.id, dst_region_name, src_inst,
+                    dst_inst)
+            try:
+                rsync_snapshot(*args)
+            except:
+                logger.exception('rsync of {1} from {0} to {2} failed'.format(
+                    *args))
 
 
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
@@ -975,7 +1044,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         key_name = config.get(conn.region.name, 'key_pair'),
         security_groups = [_security_groups, ],
         instance_type = inst_type,
-        #Kernel workaround, not tested with natty
+        # XXX Kernel workaround, not tested with natty
         kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, ['state', ], 'running')
@@ -1054,17 +1123,17 @@ def modify_kernel(region, instance_id):
         us-west-1       i386    aki-99a0f1dc
     """
     key_filename = config.get(region, 'key_filename')
+    region = _get_region_by_name(region)
     instance = _get_inst_by_id(region, instance_id)
     env.update({
         'host_string': instance.public_dns_name,
         'key_filename': key_filename,
-        'load_known_hosts': False,
     })
     sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
          'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
          'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
-    kernel = config.get(region, 'kernel'+instance.architecture)
+    kernel = config.get(region.name, 'kernel'+instance.architecture)
     instance.stop()
-    _wait_for(instance, ['state',], 'stopped')
+    _wait_for(instance, ['state'], 'stopped')
     instance.modify_attribute('kernel', kernel)
     instance.start()

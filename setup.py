@@ -8,11 +8,11 @@ setup(
     name='django-fabfile',
     url='http://redmine.odeskps.com/projects/django-fabfile',
     download_url='http://pypi.odeskps.com/django-fabfile',
-    version='2011.07.29.1',
+    version='2011.08.01.1',
     description='Deployment Django projects with Fabric.',
     install_requires=[
         'boto>=2.0b4',
-        'Fabric>=1.1.0',
+        'odeskps-Fabric>=1.2b1',
     ],
     long_description=__doc__,
     maintainer='Max Chervonec',

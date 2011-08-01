@@ -1,3 +1,11 @@
+Version 2011.08.01.1
+--------------------
+
+*XXX* Requirements updated with patched version of Fabric - please
+install it from http://pypi.odeskps.com/simple/odeskps-fabric/ using::
+
+    pip install odeskps-Fabric
+
 Version 2011.07.26.1
 --------------------
 
