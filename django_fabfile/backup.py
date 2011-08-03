@@ -240,6 +240,17 @@ class _WaitForProper(object):
                     break
         return wrapper
 
+try:
+    ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
+    ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
+except _NoOptionError as err:
+    _warn(str(err))
+else:
+    _wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
+                                    pause=ssh_timeout_interval)(sudo)
+    _wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
+                                      pause=ssh_timeout_interval)(exists)
+
 
 def _clone_tags(src_res, dst_res):
     for tag in src_res.tags:
@@ -739,9 +750,6 @@ def _mount_volume(vol, mkfs=False):
     vol.update()
     inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'key_filename')
-    _wait_for_sudo = _WaitForProper(
-        attempts=config.getint('DEFAULT', 'ssh_timeout_attempts'),
-        pause=config.getint('DEFAULT', 'ssh_timeout_interval'))(sudo)
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
         dev = _get_vol_dev(vol)
         mountpoint = dev.replace('/dev/', '/media/')
@@ -806,7 +814,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             key_filename = config.get(inst.region.name, 'key_filename')
             with settings(host_string=inst.public_dns_name,
                           key_filename=key_filename):
-                sudo('umount {0}'.format(mnt))
+                _wait_for_sudo('umount {0}'.format(mnt))
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
@@ -837,9 +845,6 @@ def _get_vol_dev(vol):
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
     logger.debug(env, output)
-    _wait_for_exists = _WaitForProper(
-        attempts=config.getint('DEFAULT', 'ssh_timeout_attempts'),
-        pause=config.getint('DEFAULT', 'ssh_timeout_interval'))(exists)
     for dev in [attached_dev, natty_dev]:
         if _wait_for_exists(dev):
             return dev
@@ -904,8 +909,8 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
     with _config_temp_ssh(dst_inst.connection) as key_file:
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-            sudo('cp /root/.ssh/authorized_keys '
-                 '/root/.ssh/authorized_keys.bak')
+            _wait_for_sudo('cp /root/.ssh/authorized_keys '
+                           '/root/.ssh/authorized_keys.bak')
             pub_key = local('ssh-keygen -y -f {0}'.format(key_file), True)
             append('/root/.ssh/authorized_keys', pub_key, use_sudo=True)
         with settings(host_string=src_inst.public_dns_name,
@@ -920,12 +925,13 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
                 '--exclude /etc/udev/rules.d/*persistent-net.rules '
                 '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
                 '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
-            sudo(cmd.format(rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
-                            key_file=dst_key_filename, src_mnt=src_mnt))
+            _wait_for_sudo(cmd.format(
+                rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
+                key_file=dst_key_filename, src_mnt=src_mnt))
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-            sudo('mv /root/.ssh/authorized_keys.bak '
-                 '/root/.ssh/authorized_keys')
+            _wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
+                           '/root/.ssh/authorized_keys')
 
 
 def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
@@ -971,7 +977,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
     dst_conn = _get_region_by_name(dst_region_name).connect()
 
-    info = 'Going to transmit {snap} {snap.description}'
+    info = 'Going to transmit {snap.volume_zise} GiB {snap} {snap.description}'
     if src_snap.tags.get('Name'):
         info += ' of {name}'
     info += ' from {snap.region} to {dst}'
