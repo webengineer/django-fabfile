@@ -2,7 +2,7 @@ from fabric.api import env, settings, sudo, abort, put
 from ConfigParser import ConfigParser as _ConfigParser
 from os.path import isfile as _isfile
 
-from django_fabfile.utils import _get_region_by_name
+from utils import _get_region_by_name
 
 
 try:

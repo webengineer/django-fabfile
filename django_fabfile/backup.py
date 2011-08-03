@@ -40,7 +40,7 @@ from os import chmod as _chmod, remove as _remove
 from os.path import (realpath as _realpath, split as _split)
 from pprint import PrettyPrinter as _PrettyPrinter
 from pydoc import pager as _pager
-from re import compile as _compile
+from re import (compile as _compile, split as re_split)
 from string import lowercase
 from time import sleep as _sleep
 from traceback import format_exc as _format_exc
@@ -57,7 +57,7 @@ from fabric.api import env, local, prompt, put, settings, sudo
 from fabric.contrib.files import append, exists
 from fabric.state import output
 
-from django_fabfile.utils import _get_region_by_name
+from utils import _get_region_by_name
 
 
 config_file = 'fabfile.cfg'
@@ -1046,13 +1046,13 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     conn = _get_region_by_name(region_name).connect()
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or _get_descr_attr(image, 'Type') or 't1.micro'
-    _security_groups = _prompt_to_select(
-        [sec.name for sec in conn.get_all_security_groups()],
-        'Select security group')
+    _security_groups = raw_input([sec.name for sec in 
+                        conn.get_all_security_groups()])
+    _sg = re_split(",", _security_groups)
     _wait_for(image, ['state'], 'available')
     reservation = image.run(
         key_name = config.get(conn.region.name, 'key_pair'),
-        security_groups = [_security_groups, ],
+        security_groups = _sg,
         instance_type = inst_type,
         # XXX Kernel workaround, not tested with natty
         kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
