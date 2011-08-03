@@ -1,3 +1,8 @@
+Version 2011.08.03.4
+--------------------
+
+Added `minutes_for_snap` option to `DEFAULT` section of config.
+
 Version 2011.08.01.2
 --------------------
 

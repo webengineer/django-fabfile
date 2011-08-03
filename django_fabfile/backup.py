@@ -423,7 +423,8 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     logger.info('{0} initiated from Volume:{1} of {2}'
         .format(snapshot, vol_id, instance))
     if synchronously:
-        _wait_for(snapshot, '100%', limit=30 * 60)
+        timeout = config.get('DEFAULT', 'minutes_for_snap')
+        _wait_for(snapshot, '100%', limit=timeout * 60)
     return snapshot
 
 
@@ -953,7 +954,8 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     new_dst_snap = dst_vol.create_snapshot(src_snap.description)
     _clone_tags(src_snap, new_dst_snap)
-    _wait_for(new_dst_snap, '100%', limit=30 * 60)
+    timeout = config.get('DEFAULT', 'minutes_for_snap')
+    _wait_for(new_dst_snap, '100%', limit=timeout * 60)
     if old_snap:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
@@ -964,12 +966,14 @@ def _create_empty_snapshot(region, size):
     """Format new filesystem."""
     with _create_temp_inst(region) as inst:
         vol = region.connect().create_volume(size, inst.placement)
-        earmarking_tag = config.get(dst_conn.region.name, 'tag_name')
+        earmarking_tag = config.get(region.name, 'tag_name')
         vol.add_tag(earmarking_tag, 'temporary')
         vol.attach(inst.id, _get_avail_dev(inst))
         _mount_volume(vol, mkfs=True)
         snap = vol.create_snapshot()
         snap.add_tag(earmarking_tag, 'temporary')
+        vol.detach(True)
+        _wait_for(vol, 'available')
         vol.delete()
         return snap
 

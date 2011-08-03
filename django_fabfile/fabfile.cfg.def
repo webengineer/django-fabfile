@@ -6,6 +6,7 @@ ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z
 architecture = x86_64
 debug = False
 log_to_file = False
+minutes_for_snap = 60
 ssh_security_group = ssh-access
 ssh_timeout_attempts = 30
 ssh_timeout_interval = 30
