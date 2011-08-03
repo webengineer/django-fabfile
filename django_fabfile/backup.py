@@ -963,7 +963,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
 def _create_empty_snapshot(region, size):
     """Format new filesystem."""
     with _create_temp_inst(region) as inst:
-        vol = region.connection.create_volume(size, inst.placement)
+        vol = region.connect().create_volume(size, inst.placement)
         earmarking_tag = config.get(dst_conn.region.name, 'tag_name')
         vol.add_tag(earmarking_tag, 'temporary')
         vol.attach(inst.id, _get_avail_dev(inst))
