@@ -748,6 +748,7 @@ def _mount_volume(vol, mkfs=False):
         volume to be mounted on the instance it is attached to."""
 
     vol.update()
+    assert vol.attach_data
     inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'key_filename')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
@@ -959,6 +960,20 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
         old_snap.delete()
 
 
+def _create_empty_snapshot(region, size):
+    """Format new filesystem."""
+    with _create_temp_inst(region) as inst:
+        vol = region.connection.create_volume(size, inst.placement)
+        earmarking_tag = config.get(dst_conn.region.name, 'tag_name')
+        vol.add_tag(earmarking_tag, 'temporary')
+        vol.attach(inst.id, _get_avail_dev(inst))
+        _mount_volume(vol, mkfs=True)
+        snap = vol.create_snapshot()
+        snap.add_tag(earmarking_tag, 'temporary')
+        vol.delete()
+        return snap
+
+
 def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                    src_inst=None, dst_inst=None):
 
@@ -977,7 +992,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
     dst_conn = _get_region_by_name(dst_region_name).connect()
 
-    info = 'Going to transmit {snap.volume_zise} GiB {snap} {snap.description}'
+    info = 'Going to transmit {snap.volume_size} GiB {snap} {snap.description}'
     if src_snap.tags.get('Name'):
         info += ' of {name}'
     info += ' from {snap.region} to {dst}'
@@ -994,14 +1009,9 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
             logger.info('Stepping over {src} - it\'s not newer than {dst} '
                         '{dst.description} in {dst_reg}'.format(**kwargs))
             return
-    else:    # Create empty snapshot.
-        dst_vol = dst_conn.create_volume(src_snap.volume_size,
-                                         dst_conn.get_all_zones()[0])
-        earmarking_tag = config.get(dst_conn.region.name, 'tag_name')
-        dst_vol.add_tag(earmarking_tag, 'temporary')
-        dst_snap = dst_vol.create_snapshot()
-        dst_snap.add_tag(earmarking_tag, 'temporary')
-        dst_vol.delete()
+    else:
+        dst_snap = _create_empty_snapshot(dst_conn.region,
+                                          src_snap.volume_size)
 
     with _nested(_attach_snapshot(src_snap, inst=src_inst),
                  _attach_snapshot(dst_snap, inst=dst_inst)) as (
