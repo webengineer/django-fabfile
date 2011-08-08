@@ -1,3 +1,8 @@
+Version 2011.08.08.1
+--------------------
+
+Updated logging setup with option ``logging_folder``.
+
 Version 2011.08.03.4
 --------------------
 

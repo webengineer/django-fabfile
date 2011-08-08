@@ -28,6 +28,7 @@ USAGE:
 '''
 import logging
 import logging.handlers
+import os
 import sys
 
 from datetime import timedelta as _timedelta, datetime
@@ -66,10 +67,10 @@ config.read(config_file)
 try:
     username = config.get('DEFAULT', 'username')
     debug = config.getboolean('DEFAULT', 'debug')
-    log_to_file = config.getboolean('DEFAULT', 'log_to_file')
+    logging_folder = config.get('DEFAULT', 'logging_folder')
 except _NoOptionError:
     username = 'ubuntu'
-    debug = log_to_file = False
+    debug = logging_folder = False
 else:
     env.update({'user': username})
 
@@ -78,7 +79,6 @@ env.update({'disable_known_hosts': True})
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
 LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S %Z'
-LOG_FILENAME = __name__ + '.log'
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,8 @@ if debug:
 else:
     logger.setLevel(logging.INFO)
 
-if log_to_file:
+if logging_folder:
+    LOG_FILENAME = os.path.join(logging_folder, __name__ + '.log')
     handler = logging.handlers.TimedRotatingFileHandler(
         LOG_FILENAME, 'midnight', backupCount=30)
 
