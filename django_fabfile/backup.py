@@ -22,7 +22,7 @@ USAGE:
   4. To backup all instances in all regions, which tagged with some tag
   ('Earmarking':'production' for example), add this tags to [main]
   section of fabfile.cfg and run:
-          fab -f backup.py backup_instances_by_regions
+          fab -f backup.py backup_instances_by_tag
   5. To purge old snapshots in all regions, run:
           fab -f backup.py trim_snapshots_for_regions
 '''
@@ -402,7 +402,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
     dev
         by default /dev/sda1 will be snapshotted;
     synchronously
-        wait for completion."""
+        wait for successful completion."""
     assert bool(instance_id) ^ bool(instance), (
         'Either instance_id or instance should be specified')
     region = _get_region_by_name(region_name)
@@ -419,13 +419,27 @@ def create_snapshot(region_name, instance_id=None, instance=None,
         'Time': _now(),
         }, [instance])
     conn = region.connect()
-    snapshot = conn.create_snapshot(vol_id, description)
-    _clone_tags(instance, snapshot)
-    logger.info('{0} initiated from Volume:{1} of {2}'
-        .format(snapshot, vol_id, instance))
+
+    def _initiate_snapshot():
+        snapshot = conn.create_snapshot(vol_id, description)
+        _clone_tags(instance, snapshot)
+        logger.info('{0} initiated from Volume:{1} of {2}'
+            .format(snapshot, vol_id, instance))
+        return snapshot
+
     if synchronously:
-        timeout = config.get('DEFAULT', 'minutes_for_snap')
-        _wait_for(snapshot, '100%', limit=timeout * 60)
+        timeout = config.getint('DEFAULT', 'minutes_for_snap')
+        while True:     # Iterate unless success and delete failed snapshots.
+            snapshot = _initiate_snapshot()
+            try:
+                _wait_for(snapshot, '100%', limit=timeout * 60)
+                assert snapshot.status == 'completed', ('completed with '
+                    'wrong status {0}'.format(snapshot.status))
+            except (StateNotChangedError, AssertionError) as err:
+                logger.error(str(err) + ' - deleting')
+                snapshot.delete()
+    else:
+        snapshot = _initiate_snapshot()
     return snapshot
 
 
@@ -444,7 +458,7 @@ def backup_instance(region_name, instance_id=None, instance=None,
     region = _get_region_by_name(region_name)
     if instance_id:
         instance = _get_inst_by_id(region, instance_id)
-    snapshots = []  # NOTE Fabric doesn't supports generators.
+    snapshots = []
     for dev in instance.block_device_mapping:
         snapshots.append(create_snapshot(
             region.name, instance=instance, dev=dev,
@@ -452,7 +466,8 @@ def backup_instance(region_name, instance_id=None, instance=None,
     return snapshots
 
 
-def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None):
+def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
+                            synchronously=True):
     """Creates backup for all instances with given tag in region.
 
     region_name
@@ -470,7 +485,8 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None):
         filters = {'resource-type': 'instance', 'key': tag_name,
                    'tag-value': tag_value}
         for tag in conn.get_all_tags(filters=filters):
-            snapshots += backup_instance(reg, instance_id=tag.res_id)
+            snapshots += backup_instance(reg, instance_id=tag.res_id,
+                                         synchronously=synchronously)
     return snapshots
 
 
@@ -789,8 +805,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
             _clone_tags(snap, vol)
-            vol.add_tag(config.get(inst.region.name, 'tag_name'),
-                        'temporary')
+            vol.add_tag(config.get(inst.region.name, 'tag_name'), 'temporary')
             volumes_to_delete.append(vol)
             dev_name = _get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
@@ -955,7 +970,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     new_dst_snap = dst_vol.create_snapshot(src_snap.description)
     _clone_tags(src_snap, new_dst_snap)
-    timeout = config.get('DEFAULT', 'minutes_for_snap')
+    timeout = config.getint('DEFAULT', 'minutes_for_snap')
     _wait_for(new_dst_snap, '100%', limit=timeout * 60)
     if old_snap:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,

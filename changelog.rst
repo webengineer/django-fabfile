@@ -1,3 +1,10 @@
+Version 2011.08.10.1
+--------------------
+
+Changed snapshots creation with function
+``django_fabfile.backup.backup_instances_by_tag`` to wait for successful
+completion in order to avoid snapshots with status "error".
+
 Version 2011.08.08.1
 --------------------
 
