@@ -253,10 +253,10 @@ else:
                                       pause=ssh_timeout_interval)(exists)
 
 
-def _clone_tags(src_res, dst_res):
-    for tag in src_res.tags:
-        dst_res.add_tag(tag, src_res.tags[tag])
-    logger.debug('Tags cloned from {0} to {1}'.format(src_res, dst_res))
+def _add_tags(res, tags):
+    for tag in tags:
+        res.add_tag(tag, tags[tag])
+    logger.debug('Tags added to {0}'.format(res))
 
 
 def _get_descr_attr(resource, attr):
@@ -326,7 +326,7 @@ def update_volumes_tags(filters=None):
             for bdm in inst.block_device_mapping.keys():
                 vol_id = inst.block_device_mapping[bdm].volume_id
                 vol = inst.connection.get_all_volumes([vol_id])[0]
-                _clone_tags(inst, vol)
+                _add_tags(vol, inst.tags)
 
 
 def modify_instance_termination(region, instance_id):
@@ -422,7 +422,7 @@ def create_snapshot(region_name, instance_id=None, instance=None,
 
     def _initiate_snapshot():
         snapshot = conn.create_snapshot(vol_id, description)
-        _clone_tags(instance, snapshot)
+        _add_tags(snapshot, instance.tags)
         logger.info('{0} initiated from Volume:{1} of {2}'
             .format(snapshot, vol_id, instance))
         return snapshot
@@ -806,7 +806,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
         while _get_avail_dev(inst):
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
-            _clone_tags(snap, vol)
+            _add_tags(vol, snap.tags)
             vol.add_tag(config.get(inst.region.name, 'tag_name'), 'temporary')
             volumes_to_delete.append(vol)
             dev_name = _get_avail_dev(inst)
@@ -971,7 +971,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     new_dst_snap = dst_vol.create_snapshot(src_snap.description)
-    _clone_tags(src_snap, new_dst_snap)
+    _add_tags(new_dst_snap, src_snap.tags)
     timeout = config.getint('DEFAULT', 'minutes_for_snap')
     _wait_for(new_dst_snap, '100%', limit=timeout * 60)
     if old_snap:
@@ -1112,7 +1112,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     _wait_for(new_instance, 'running')
-    _clone_tags(image, new_instance)
+    _add_tags(new_instance, image.tags)
     modify_instance_termination(conn.region.name, new_instance.id)
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
@@ -1157,7 +1157,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         root_device_name=_get_descr_attr(snap, 'Root_dev_name') or root_dev,
         block_device_map=block_map)
     image = conn.get_all_images(image_ids=[result, ])[0]
-    _clone_tags(snap, image)
+    _add_tags(image, snap.tags)
 
     logger.info('The new AMI ID = {0}'.format(result))
 
