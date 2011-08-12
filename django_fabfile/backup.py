@@ -433,11 +433,13 @@ def create_snapshot(region_name, instance_id=None, instance=None,
             snapshot = _initiate_snapshot()
             try:
                 _wait_for(snapshot, '100%', limit=timeout * 60)
-                assert snapshot.status == 'completed', ('completed with '
-                    'wrong status {0}'.format(snapshot.status))
+                assert snapshot.status == 'completed', (
+                    'completed with wrong status {0}'.format(snapshot.status))
             except (StateNotChangedError, AssertionError) as err:
                 logger.error(str(err) + ' - deleting')
                 snapshot.delete()
+            else:
+                break
     else:
         snapshot = _initiate_snapshot()
     return snapshot
@@ -813,7 +815,7 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             try:
                 _wait_for(vol, 'attached', ['attach_data', 'status'], limit=60)
             except StateNotChangedError:
-                pass    # Attempt to attach as next device.
+                logger.error('Attempt to attach as next device')
             else:
                 break
         return vol, volumes_to_delete
