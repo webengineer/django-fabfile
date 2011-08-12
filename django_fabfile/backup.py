@@ -274,12 +274,6 @@ def _get_snap_time(snap):
     return _get_descr_attr(snap, 'Time')
 
 
-def _dumps_resources(res_dict={}, res_list=[]):
-    for res in res_list:
-        res_dict.update(dict([unicode(res).split(':')]))
-    return _dumps(res_dict)
-
-
 def _get_inst_by_id(region, instance_id):
     conn = region.connect()
     res = conn.get_all_instances([instance_id, ])
@@ -391,40 +385,37 @@ def _select_snapshot():
                                           paging=True)
 
 
-def create_snapshot(region_name, instance_id=None, instance=None,
-                    dev='/dev/sda1', synchronously=False):
-    """Return newly created snapshot of specified instance device.
+def _create_snapshot(vol, synchronously=False, description='', tags=None):
+    """Return new snapshot for the volume.
 
-    region_name
-        name of region where instance is located;
-    instance, instance_id
-        either `instance_id` or `instance` argument should be specified;
-    dev
-        by default /dev/sda1 will be snapshotted;
+    vol
+        volume to snapshot;
     synchronously
-        wait for successful completion."""
-    assert bool(instance_id) ^ bool(instance), (
-        'Either instance_id or instance should be specified')
-    region = _get_region_by_name(region_name)
-    if instance_id:
-        instance = _get_inst_by_id(region, instance_id)
-    vol_id = instance.block_device_mapping[dev].volume_id
-    description = _dumps_resources({
-        'Volume': vol_id,
-        'Region': region.name,
-        'Device': dev,
-        'Type': instance.instance_type,
-        'Arch': instance.architecture,
-        'Root_dev_name': instance.root_device_name,
-        'Time': _now(),
-        }, [instance])
-    conn = region.connect()
+        wait for successful completion;
+    description
+        description for snapshot. Will be compiled from instnace
+        parameters by default;
+    tags
+        tags to be added to snapshot. Will be cloned from volume by
+        default."""
+    if not description and vol.attach_data:
+        instance = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
+        description = _dumps({
+            'Volume': vol.id,
+            'Region': vol.region.name,
+            'Device': vol.attach_data.device,
+            'Instance': instance.id,
+            'Type': instance.instance_type,
+            'Arch': instance.architecture,
+            'Root_dev_name': instance.root_device_name,
+            'Time': _now(),
+            })
 
     def _initiate_snapshot():
-        snapshot = conn.create_snapshot(vol_id, description)
-        _add_tags(snapshot, instance.tags)
-        logger.info('{0} initiated from Volume:{1} of {2}'
-            .format(snapshot, vol_id, instance))
+        snapshot = vol.create_snapshot(description)
+        _add_tags(snapshot, tags or vol.tags)
+        logger.info('{0} initiated from {1} of {2}'.format(snapshot, vol,
+                                                           instance))
         return snapshot
 
     if synchronously:
@@ -462,9 +453,9 @@ def backup_instance(region_name, instance_id=None, instance=None,
         instance = _get_inst_by_id(region, instance_id)
     snapshots = []
     for dev in instance.block_device_mapping:
-        snapshots.append(create_snapshot(
-            region.name, instance=instance, dev=dev,
-            synchronously=synchronously))
+        vol_id = instance.block_device_mapping[dev].volume_id
+        vol = region.connect().get_all_volumes([vol_id])[0]
+        snapshots.append(_create_snapshot(vol, synchronously=synchronously))
     return snapshots
 
 
