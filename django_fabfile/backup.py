@@ -413,8 +413,7 @@ def _create_snapshot(vol, description='', tags=None, synchronously=True):
     def _initiate_snapshot():
         snapshot = vol.create_snapshot(description)
         _add_tags(snapshot, tags or vol.tags)
-        logger.info('{0} initiated from {1} of {2}'.format(snapshot, vol,
-                                                           instance))
+        logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
     if synchronously:
@@ -960,7 +959,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
     else:
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
-    _create_snapshot(dst_vol, tags=src_snap.tags)
+    _create_snapshot(dst_vol, tags=src_snap.tags, synchronously=False)
     if old_snap:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
@@ -1008,11 +1007,12 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     logger.info(info.format(snap=src_snap, dst=dst_conn.region,
                             name=src_snap.tags.get('Name')))
 
-    snaps = dst_conn.get_all_snapshots(owner='self')
+    dst_snaps = dst_conn.get_all_snapshots(owner='self')
+    dst_snaps = [snp for snp in dst_snaps if not snp.status == 'error']
     src_vol = _get_snap_vol(src_snap)
-    dst_snaps = [snp for snp in snaps if _get_snap_vol(snp) == src_vol]
-    if dst_snaps:
-        dst_snap = sorted(dst_snaps, key=_get_snap_time)[-1]
+    vol_snaps = [snp for snp in dst_snaps if _get_snap_vol(snp) == src_vol]
+    if vol_snaps:
+        dst_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
         if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
             kwargs = dict(src=src_snap, dst=dst_snap, dst_reg=dst_conn.region)
             logger.info('Stepping over {src} - it\'s not newer than {dst} '
@@ -1048,6 +1048,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     tag_value = tag_value or config.get(src_region.name, 'tag_value')
     filters = {'tag-key': tag_name, 'tag-value': tag_value}
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
+    snaps = [snp for snp in snaps if not snp.status == 'error']
     _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
     if native_only:
