@@ -54,9 +54,8 @@ from boto.ec2.blockdevicemapping import (
     EBSBlockDeviceType as _EBSBlockDeviceType)
 from boto.exception import (BotoServerError as _BotoServerError,
                             EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, local, prompt, put, settings, sudo
+from fabric.api import env, local, output, prompt, put, settings, sudo
 from fabric.contrib.files import append, exists
-from fabric.state import output
 
 from django_fabfile.utils import _get_region_by_name
 
@@ -385,7 +384,7 @@ def _select_snapshot():
                                           paging=True)
 
 
-def _create_snapshot(vol, synchronously=False, description='', tags=None):
+def _create_snapshot(vol, description='', tags=None, synchronously=True):
     """Return new snapshot for the volume.
 
     vol
@@ -961,10 +960,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
     else:
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
-    new_dst_snap = dst_vol.create_snapshot(src_snap.description)
-    _add_tags(new_dst_snap, src_snap.tags)
-    timeout = config.getint('DEFAULT', 'minutes_for_snap')
-    _wait_for(new_dst_snap, '100%', limit=timeout * 60)
+    _create_snapshot(dst_vol, tags=src_snap.tags)
     if old_snap:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
