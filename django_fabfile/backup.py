@@ -629,6 +629,16 @@ def _trim_snapshots(region_name, dry_run=False):
                     snap_found_for_this_time_period = False
 
 
+def delete_broken_snapshost():
+    for region in _regions():
+        conn = region.connect()
+        filters = {'status': 'error'}
+        snaps = conn.get_all_snapshots(owner='self', filters=filters)
+        for snp in snaps:
+            logger.info('Deleting broken {0}'.format(snp))
+            snp.delete()
+
+
 def trim_snapshots(region_name=None, dry_run=False):
     """Delete old snapshots logarithmically back in time.
 
@@ -636,6 +646,7 @@ def trim_snapshots(region_name=None, dry_run=False):
         by default process all regions;
     dry_run
         boolean, only print info about old snapshots to be deleted."""
+    delete_broken_snapshost()
     region = _get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in _regions())
     for reg in reg_names:
