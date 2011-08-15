@@ -57,7 +57,7 @@ from boto.exception import (BotoServerError as _BotoServerError,
 from fabric.api import env, local, output, prompt, put, settings, sudo
 from fabric.contrib.files import append, exists
 
-from utils import _get_region_by_name
+from django_fabfile.utils import _get_region_by_name
 
 
 config_file = 'fabfile.cfg'
@@ -71,9 +71,7 @@ except _NoOptionError:
     username = 'ubuntu'
     debug = logging_folder = False
 
-env.update({'user': username})
-
-env.update({'disable_known_hosts': True})
+env.update({'user': username, 'disable_known_hosts': True})
 
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
@@ -959,7 +957,8 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
     """Update destination region from `src_vol`.
 
     Create new snapshot with same description and tags. Delete previous
-    snapshot (if exists) of the same volume in destination region."""
+    snapshot (if exists) of the same volume in destination region if
+    ``delete_old`` is True."""
 
     src_inst = _get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
     dst_inst = _get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
@@ -1121,18 +1120,23 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
 
 
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
-               inst_arch='x86_64', inst_type='t1.micro'):
+               default_arch='x86_64', default_type='t1.micro'):
     """
     Creates AMI image from given snapshot.
 
     Force option removes prompt request and creates new instance from
     created ami image.
     region, snap_id
-        specify snapshot to be processed; snapshot description must be
-        json description of snapshotted instance.
+        specify snapshot to be processed. Snapshot description in json
+        format will be used to restore instance with same parameters;
     force
         Run instance from ami after creation without confirmation. To
         enable set value to "RUN";
+    default_arch
+        architecture to use if not mentioned in snapshot description;
+    default_type
+        instance type to use if not mentioned in snapshot description.
+        Used only if ``force`` is True.
     """
     if not region or not snap_id:
         region, snap_id = _select_snapshot()
@@ -1153,7 +1157,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     result = conn.register_image(
         name=name,
         description=snap.description,
-        architecture=_get_descr_attr(snap, 'Arch') or inst_arch,
+        architecture=_get_descr_attr(snap, 'Arch') or default_arch,
         root_device_name=_get_descr_attr(snap, 'Root_dev_name') or root_dev,
         block_device_map=block_map)
     image = conn.get_all_images(image_ids=[result, ])[0]
@@ -1164,7 +1168,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        instance_type = _get_descr_attr(snap, 'Type') or inst_type
+        instance_type = _get_descr_attr(snap, 'Type') or default_type
         launch_instance_from_ami(region, image.id, inst_type=instance_type)
 
 
