@@ -954,7 +954,7 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
                            '/root/.ssh/authorized_keys')
 
 
-def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
+def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
 
     """Update destination region from `src_vol`.
 
@@ -971,7 +971,7 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt):
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     _create_snapshot(dst_vol, tags=src_snap.tags, synchronously=False)
-    if old_snap:
+    if old_snap and delete_old:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
         old_snap.delete()
