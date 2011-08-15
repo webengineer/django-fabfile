@@ -57,7 +57,7 @@ from boto.exception import (BotoServerError as _BotoServerError,
 from fabric.api import env, local, output, prompt, put, settings, sudo
 from fabric.contrib.files import append, exists
 
-from django_fabfile.utils import _get_region_by_name
+from utils import _get_region_by_name
 
 
 config_file = 'fabfile.cfg'
@@ -70,8 +70,8 @@ try:
 except _NoOptionError:
     username = 'ubuntu'
     debug = logging_folder = False
-else:
-    env.update({'user': username})
+
+env.update({'user': username})
 
 env.update({'disable_known_hosts': True})
 
@@ -970,7 +970,8 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
     else:
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
-    _create_snapshot(dst_vol, tags=src_snap.tags, synchronously=False)
+    _create_snapshot(dst_vol, description=src_snap.description, 
+                                    tags=src_snap.tags, synchronously=False)
     if old_snap and delete_old:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
@@ -1163,7 +1164,8 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        launch_instance_from_ami(region, image.id, inst_type=inst_type)
+        instance_type = _get_descr_attr(snap, 'Type') or inst_type
+        launch_instance_from_ami(region, image.id, inst_type=instance_type)
 
 
 def modify_kernel(region, instance_id):
