@@ -1149,7 +1149,7 @@ architecture, dev, name, release):
             print "Mounting luks encrypted volume....."
             sudo('mkdir -p "{work}/root"; mount /dev/mapper/{name}'
             ' "{work}/root"'.format(work=work, name=name))
-            print "Starting syncronisation of working dir with ubuntu image..."
+            print "Starting syncronization of working dir with ubuntu image..."
             sudo('rsync --progress --archive --hard-links "{work}/ubuntu/"'
             ' "{work}/root/"'.format(work=work))
             boot_device = 'LABEL=' + bootlabel
@@ -1171,6 +1171,17 @@ architecture, dev, name, release):
             sudo('cp {data}/encrypted_root/cryptsetup '
             '{work}/root/etc/initramfs-tools/hooks/cryptsetup'
             .format(data=data, work=work))
+            """
+            Boot keys generated in easy way:
+                openssl genrsa -out boot.key 4096
+                openssl req -new -key boot.key -out boot.csr
+                openssl x509 -req -days 3652 -in boot.csr -signkey boot.key \
+                                                                -out boot.crt
+                chmod 400 boot.key
+
+            You can use overkill generation method described in
+            ./encrypted_root.tar.gz
+            """
             sudo('cp {data}/encrypted_root/boot.key {bozo_target}/boot.key'
             .format(data=data, bozo_target=bozo_target))
             sudo('cp {data}/encrypted_root/boot.crt {bozo_target}/boot.crt'
@@ -1199,13 +1210,16 @@ architecture, dev, name, release):
             print "Adding apt entries for lucid....."
             with hide('running', 'stdout'):
                 listfile = work + '/root/etc/apt/sources.list'
-                sudo('grep "lucid main" {listfile} | sed \''
-                's/lucid/maverick/g\' >> {listfile}'.format(listfile=listfile))
+                print listfile
+                sudo('grep "lucid main" {listfile} | sed "'
+                's/lucid/maverick/g" >> {work}/root/etc/apt/sources.list.d'
+                '/bozohttpd.list'.format(listfile=listfile, work=work))
                 sudo('echo -e "Package: *\nPin: release a=lucid\nPin-Priority:'
-            ' 600\n\nPackage: bozohttpd\nPin: release a=maverick\n'
-            'Pin-Priority: 1000\n\nPackage: libssl0.9.8\nPin: release '
-            'a=maverick\nPin-Priority: 1000\n" | tee '
-            '"{work}/root/etc/apt/preferences"'.format(work=work))
+                ' 600\n\nPackage: bozohttpd\nPin: release a=maverick\n'
+                'Pin-Priority: 1000\n\nPackage: libssl0.9.8\nPin: release '
+                'a=maverick\nPin-Priority: 1000\n\nPackage: *\n'
+                'Pin: release o=Ubuntu\nPin-Priority: -10\n" | tee '
+                '"{work}/root/etc/apt/preferences"'.format(work=work))
         menufile = work + '/root/boot/grub/menu.lst'
         with hide('running', 'stdout'):
             initrd = sudo('grep "^initrd" "{menufile}" | head -1 | cut -f 3'
@@ -1239,11 +1253,11 @@ architecture, dev, name, release):
             ':Unattended-Upgrade "1";\\n\' | sudo tee /etc/apt/apt.conf.d/'
             '10periodic\nenv DEBIAN_FRONTEND=noninteractive apt-get -y install'
             ' zabbix-agent python-setuptools python-pip\n'
-            'env DEBIAN_FRONTEND=noninteractive pip install http://downloads.'
-            'greenmice.info/products/ztc/ztc-11.03.2.tar.gz\n'
+            'env DEBIAN_FRONTEND=noninteractive pip install https://bitbucket'
+            '.org/rvs/ztc/downloads/ztc-11.07.1.tar.gz\n'
             'mkdir /var/log/zabbix; sudo chmod 777 /var/log/zabbix\n'
-            'sed -i "s/Server=localhost/Server=zabbix.odeskps.com,10.206.109'
-            '.28,184.73.177.59/" /etc/zabbix/zabbix_agentd.conf\n'
+            'sed -i "s/Server=localhost/Server=zabbix.odeskps.com,internal.inf'
+            'ra.odeskps.com,184.73.177.59/" /etc/zabbix/zabbix_agentd.conf\n'
             'echo "Include=/etc/zabbix-agent.d/">>/etc/zabbix/zabbix_agentd'
             '.conf; /etc/init.d/zabbix-agent restart\n'
             'mv /usr/sbin/update-inetd /usr/sbin/update-inetd.old\n'
@@ -1259,13 +1273,10 @@ architecture, dev, name, release):
             'ln -s /usr/sbin/bozohttpd /etc/initramfs-tools/boot/\n'
             'ln -s . /boot/boot\n'
             'EOT'.format(work=work))
-            print "Instaling cryptsetup and unmounting....."
+            print "Installing cryptsetup and unmounting....."
             sudo('chroot "{work}/root" <<- EOT\n'
             'apt-get -y install cryptsetup\n'
             'apt-get -y clean\n'
-            #'env DEBIAN_FRONTEND=noninteractive apt-get'
-            #' -y --force-yes dist-upgrade\n'
-            #'update-initramfs -uk all\n'
             'mv /etc/resolv.conf.old /etc/resolv.conf\n'
             'umount /dev/pts\n'
             'umount /proc\n'
