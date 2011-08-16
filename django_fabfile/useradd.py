@@ -1,8 +1,8 @@
-from fabric.api import env, settings, sudo, abort, put
+from fabric.api import env, settings, sudo, abort, put, task
 from ConfigParser import ConfigParser as _ConfigParser
 from os.path import isfile as _isfile
 
-from django_fabfile.utils import _get_region_by_name
+from django_fabfile.utils import get_region_by_name
 
 
 try:
@@ -21,7 +21,7 @@ env.update({'disable_known_hosts': True})
 
 
 def _get_inst_by_id(region, instance_id):
-    conn = _get_region_by_name(region).connect()
+    conn = get_region_by_name(region).connect()
     res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
@@ -68,6 +68,7 @@ def _create_account(username, region, instance_ids, passwordless, sudo):
     _sudo('chmod 600 /home/%(username)s/.ssh/authorized_keys' % env)
 
 
+@task
 def deluser(name, region=None, instance_ids=None):
     """
     Removes user <name> with deluser from "host1;host2" list in <region>
@@ -92,6 +93,7 @@ def deluser(name, region=None, instance_ids=None):
         _sudo('deluser %(username)s' % env)
 
 
+@task
 def adduser(username, region=None, instance_ids=None,
                                 passwordless=None, sudo=None):
     """

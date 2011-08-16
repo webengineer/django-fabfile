@@ -29,45 +29,40 @@ USAGE:
 import logging
 import logging.handlers
 import os
+import re
 import sys
 
-from datetime import timedelta as _timedelta, datetime
-from ConfigParser import (ConfigParser as _ConfigParser, NoOptionError as
-                          _NoOptionError)
-from contextlib import contextmanager as _contextmanager, nested as _nested
-from itertools import groupby as _groupby
-from json import dumps as _dumps, loads as _loads
-from os import chmod as _chmod, remove as _remove
-from os.path import (realpath as _realpath, split as _split)
-from pprint import PrettyPrinter as _PrettyPrinter
-from pydoc import pager as _pager
-from re import compile as _compile
+from datetime import timedelta, datetime
+from ConfigParser import ConfigParser, NoOptionError
+from contextlib import contextmanager, nested
+from itertools import groupby
+from json import dumps, loads
+from os import chmod, remove
+from os.path import realpath, split
+from pprint import PrettyPrinter
+from pydoc import pager
 from string import lowercase
-from time import sleep as _sleep
-from traceback import format_exc as _format_exc
-from warnings import warn as _warn
+from time import sleep
+from traceback import format_exc
+from warnings import warn
 
-from boto.ec2 import (connect_to_region as _connect_to_region,
-                      regions as _regions)
-from boto.ec2.blockdevicemapping import (
-    BlockDeviceMapping as _BlockDeviceMapping,
-    EBSBlockDeviceType as _EBSBlockDeviceType)
-from boto.exception import (BotoServerError as _BotoServerError,
-                            EC2ResponseError as _EC2ResponseError)
-from fabric.api import env, local, output, prompt, put, settings, sudo
+from boto.ec2 import connect_to_region, regions
+from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
+from boto.exception import BotoServerError, EC2ResponseError
+from fabric.api import env, local, output, prompt, put, settings, sudo, task
 from fabric.contrib.files import append, exists
 
-from django_fabfile.utils import _get_region_by_name
+from django_fabfile.utils import get_region_by_name
 
 
 config_file = 'fabfile.cfg'
-config = _ConfigParser()
+config = ConfigParser()
 config.read(config_file)
 try:
     username = config.get('DEFAULT', 'username')
     debug = config.getboolean('DEFAULT', 'debug')
     logging_folder = config.get('DEFAULT', 'logging_folder')
-except _NoOptionError:
+except NoOptionError:
     username = 'ubuntu'
     debug = logging_folder = False
 
@@ -117,7 +112,7 @@ logger.addHandler(handler)
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
-def _prompt_to_select(choices, query='Select from', paging=False):
+def prompt_to_select(choices, query='Select from', paging=False):
     """Prompt to select an option from provided choices.
 
     choices: list or dict. If dict, then choice will be made among keys.
@@ -135,8 +130,8 @@ def _prompt_to_select(choices, query='Select from', paging=False):
     picked = None
     while not picked in keys:
         if paging:
-            pp = _PrettyPrinter()
-            _pager(query + '\n' + pp.pformat(choices))
+            pp = PrettyPrinter()
+            pager(query + '\n' + pp.pformat(choices))
             text = 'Enter your choice or press Return to view options again'
         else:
             text = '{query} {choices}'.format(query=query, choices=choices)
@@ -153,7 +148,7 @@ class StateNotChangedError(Exception):
         return 'State remain {0} after limited time gone'.format(self.state)
 
 
-def _wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
+def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
     """Wait for attribute to go into state.
 
     attrs
@@ -189,7 +184,7 @@ def _wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
         while obj_state != state and slept < limit:
             logger.info('still {0}...'.format(obj_state))
             sleep_for = sleep_for + 5 if sleep_for < max_sleep else max_sleep
-            _sleep(sleep_for)
+            sleep(sleep_for)
             slept += sleep_for
             obj_state = get_state(obj, attrs)
         if obj_state == state:
@@ -227,13 +222,13 @@ class _WaitForProper(object):
                 try:
                     return func(*args, **kwargs)
                 except BaseException as err:
-                    logger.debug(_format_exc())
+                    logger.debug(format_exc())
                     logger.error(repr(err))
 
                     if attempts > 0:
                         logger.info('waiting next {0} sec ({1} times left)'
                             .format(self.pause, attempts))
-                        _sleep(self.pause)
+                        sleep(self.pause)
                 else:
                     break
         return wrapper
@@ -241,8 +236,8 @@ class _WaitForProper(object):
 try:
     ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
     ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
-except _NoOptionError as err:
-    _warn(str(err))
+except NoOptionError as err:
+    warn(str(err))
 else:
     _wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
                                     pause=ssh_timeout_interval)(sudo)
@@ -250,28 +245,28 @@ else:
                                       pause=ssh_timeout_interval)(exists)
 
 
-def _add_tags(res, tags):
+def add_tags(res, tags):
     for tag in tags:
         res.add_tag(tag, tags[tag])
     logger.debug('Tags added to {0}'.format(res))
 
 
-def _get_descr_attr(resource, attr):
+def get_descr_attr(resource, attr):
     try:
-        return _loads(resource.description)[attr]
+        return loads(resource.description)[attr]
     except:
         pass
 
 
-def _get_snap_vol(snap):
-    return _get_descr_attr(snap, 'Volume')
+def get_snap_vol(snap):
+    return get_descr_attr(snap, 'Volume')
 
 
-def _get_snap_time(snap):
-    return _get_descr_attr(snap, 'Time')
+def get_snap_time(snap):
+    return get_descr_attr(snap, 'Time')
 
 
-def _get_inst_by_id(region, instance_id):
+def get_inst_by_id(region, instance_id):
     conn = region.connect()
     res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
@@ -284,42 +279,44 @@ def _get_inst_by_id(region, instance_id):
     return instances[0]
 
 
-def _get_all_instances(region=None, id_only=False):
+def get_all_instances(region=None, id_only=False):
     if not region:
-        _warn('There is no guarantee of instance id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in _regions())
-    connections = (_connect_to_region(reg) for reg in reg_names)
+        warn('There is no guarantee of instance id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in regions())
+    connections = (connect_to_region(reg) for reg in reg_names)
     for con in connections:
         for res in con.get_all_instances():
             for inst in res.instances:
                 yield inst.id if id_only else inst
 
 
-def _get_all_snapshots(region=None, id_only=False):
+def get_all_snapshots(region=None, id_only=False):
     if not region:
-        _warn('There is no guarantee of snapshot id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in _regions())
-    connections = (_connect_to_region(reg) for reg in reg_names)
+        warn('There is no guarantee of snapshot id uniqueness across regions')
+    reg_names = [region] if region else (reg.name for reg in regions())
+    connections = (connect_to_region(reg) for reg in reg_names)
     for con in connections:
         for snap in con.get_all_snapshots(owner='self'):
             yield snap.id if id_only else snap
 
 
+@task
 def update_volumes_tags(filters=None):
     """Clone tags from instances to volumes.
 
     filters
         apply optional filtering for the `get_all_instances`."""
-    for region in _regions():
+    for region in regions():
         reservations = region.connect().get_all_instances(filters=filters)
         for res in reservations:
             inst = res.instances[0]
             for bdm in inst.block_device_mapping.keys():
                 vol_id = inst.block_device_mapping[bdm].volume_id
                 vol = inst.connection.get_all_volumes([vol_id])[0]
-                _add_tags(vol, inst.tags)
+                add_tags(vol, inst.tags)
 
 
+@task
 def modify_instance_termination(region, instance_id):
     """Mark production instnaces as uneligible for termination.
 
@@ -330,26 +327,26 @@ def modify_instance_termination(region, instance_id):
 
     You must change value of preconfigured tag_name and run this command
     before terminating production instance via API."""
-    conn = _get_region_by_name(region).connect()
-    inst = _get_inst_by_id(conn.region, instance_id)
+    conn = get_region_by_name(region).connect()
+    inst = get_inst_by_id(conn.region, instance_id)
     prod_tag = config.get(conn.region.name, 'tag_name')
     prod_val = config.get(conn.region.name, 'tag_value')
     inst_tag_val = inst.tags.get(prod_tag)
     inst.modify_attribute('disableApiTermination', inst_tag_val == prod_val)
 
 
-def _select_snapshot():
-    region_name = _prompt_to_select([reg.name for reg in _regions()],
+def select_snapshot():
+    region_name = prompt_to_select([reg.name for reg in regions()],
                                         'Select region from')
     snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
                      'otherwise)')
     if snap_id:
-        if snap_id in _get_all_snapshots(region_name, id_only=True):
+        if snap_id in get_all_snapshots(region_name, id_only=True):
             return region_name, snap_id
         else:
             logger.info('No snapshot with provided ID found')
 
-    instances_list = list(_get_all_instances(region_name))
+    instances_list = list(get_all_instances(region_name))
     instances = dict((inst.id, {
         'Name': inst.tags.get('Name'),
         'State': inst.state,
@@ -358,10 +355,10 @@ def _select_snapshot():
         'Type': inst.instance_type,
         'IP Address': inst.ip_address,
         'DNS Name': inst.public_dns_name}) for inst in instances_list)
-    instance_id = _prompt_to_select(instances, 'Select instance ID from',
+    instance_id = prompt_to_select(instances, 'Select instance ID from',
                                     paging=True)
 
-    all_instances = _get_all_instances(region_name)
+    all_instances = get_all_instances(region_name)
     inst = [inst for inst in all_instances if inst.id == instance_id][0]
     volumes = dict((dev.volume_id, {
         'Status': dev.status,
@@ -369,20 +366,20 @@ def _select_snapshot():
         'Size': dev.size,
         'Snapshot ID': dev.snapshot_id}) for dev in
                                             inst.block_device_mapping.values())
-    volume_id = _prompt_to_select(volumes, 'Select volume ID from',
+    volume_id = prompt_to_select(volumes, 'Select volume ID from',
                                   paging=True)
 
-    all_snaps = _get_all_snapshots(region_name)
+    all_snaps = get_all_snapshots(region_name)
     snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
     snaps = dict((snap.id, {'Volume': snap.volume_id,
                             'Date': snap.start_time,
                             'Description': snap.description}) for snap in
                                                                     snaps_list)
-    return region_name, _prompt_to_select(snaps, 'Select snapshot ID from',
+    return region_name, prompt_to_select(snaps, 'Select snapshot ID from',
                                           paging=True)
 
 
-def _create_snapshot(vol, description='', tags=None, synchronously=True):
+def create_snapshot(vol, description='', tags=None, synchronously=True):
     """Return new snapshot for the volume.
 
     vol
@@ -396,8 +393,8 @@ def _create_snapshot(vol, description='', tags=None, synchronously=True):
         tags to be added to snapshot. Will be cloned from volume by
         default."""
     if not description and vol.attach_data:
-        instance = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
-        description = _dumps({
+        instance = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+        description = dumps({
             'Volume': vol.id,
             'Region': vol.region.name,
             'Device': vol.attach_data.device,
@@ -408,18 +405,18 @@ def _create_snapshot(vol, description='', tags=None, synchronously=True):
             'Time': _now(),
             })
 
-    def _initiate_snapshot():
+    def initiate_snapshot():
         snapshot = vol.create_snapshot(description)
-        _add_tags(snapshot, tags or vol.tags)
+        add_tags(snapshot, tags or vol.tags)
         logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
     if synchronously:
         timeout = config.getint('DEFAULT', 'minutes_for_snap')
         while True:     # Iterate unless success and delete failed snapshots.
-            snapshot = _initiate_snapshot()
+            snapshot = initiate_snapshot()
             try:
-                _wait_for(snapshot, '100%', limit=timeout * 60)
+                wait_for(snapshot, '100%', limit=timeout * 60)
                 assert snapshot.status == 'completed', (
                     'completed with wrong status {0}'.format(snapshot.status))
             except (StateNotChangedError, AssertionError) as err:
@@ -428,10 +425,11 @@ def _create_snapshot(vol, description='', tags=None, synchronously=True):
             else:
                 break
     else:
-        snapshot = _initiate_snapshot()
+        snapshot = initiate_snapshot()
     return snapshot
 
 
+@task
 def backup_instance(region_name, instance_id=None, instance=None,
                     synchronously=False):
     """Return list of created snapshots for specified instance.
@@ -444,38 +442,41 @@ def backup_instance(region_name, instance_id=None, instance=None,
         wait for completion."""
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
-    region = _get_region_by_name(region_name)
+    region = get_region_by_name(region_name)
     if instance_id:
-        instance = _get_inst_by_id(region, instance_id)
+        instance = get_inst_by_id(region, instance_id)
     snapshots = []
     for dev in instance.block_device_mapping:
         vol_id = instance.block_device_mapping[dev].volume_id
         vol = region.connect().get_all_volumes([vol_id])[0]
-        snapshots.append(_create_snapshot(vol, synchronously=synchronously))
+        snapshots.append(create_snapshot(vol, synchronously=synchronously))
     return snapshots
 
 
+@task
 def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
-                            synchronously=True):
+                            asynchronously=False):
     """Creates backup for all instances with given tag in region.
 
     region_name
         will be applied across all regions by default;
     tag_name, tag_value
         will be fetched from config by default, may be configured
-        per region."""
+        per region;
+    asynchronously
+        will be accomplished without checking results."""
     snapshots = []
-    region = _get_region_by_name(region_name) if region_name else None
-    reg_names = [region.name] if region else (reg.name for reg in _regions())
+    region = get_region_by_name(region_name) if region_name else None
+    reg_names = [region.name] if region else (reg.name for reg in regions())
     for reg in reg_names:
         tag_name = tag_name or config.get(reg, 'tag_name')
         tag_value = tag_value or config.get(reg, 'tag_value')
-        conn = _connect_to_region(reg)
+        conn = connect_to_region(reg)
         filters = {'resource-type': 'instance', 'key': tag_name,
                    'tag-value': tag_value}
         for tag in conn.get_all_tags(filters=filters):
             snapshots += backup_instance(reg, instance_id=tag.res_id,
-                                         synchronously=synchronously)
+                                         synchronously=not asynchronously)
     return snapshots
 
 
@@ -492,13 +493,13 @@ def _trim_snapshots(region_name, dry_run=False):
     quarterly_backups = config.getint('purge_backups', 'quarterly_backups')
     yearly_backups = config.getint('purge_backups', 'yearly_backups')
 
-    conn = _get_region_by_name(region_name).connect()
+    conn = get_region_by_name(region_name).connect()
     # work with UTC time, which is what the snapshot start time is reported in
     now = datetime.utcnow()
     last_hour = datetime(now.year, now.month, now.day, now.hour)
     last_midnight = datetime(now.year, now.month, now.day)
     last_sunday = datetime(now.year, now.month,
-          now.day) - _timedelta(days=(now.weekday() + 1) % 7)
+          now.day) - timedelta(days=(now.weekday() + 1) % 7)
     last_month = datetime(now.year, now.month -1, now.day)
     last_year = datetime(now.year-1, now.month, now.day)
     other_years = datetime(now.year-2, now.month, now.day)
@@ -509,25 +510,25 @@ def _trim_snapshots(region_name, dry_run=False):
     oldest_snapshot_date = datetime(2000, 1, 1)
 
     for hour in range(0, hourly_backups):
-        target_backup_times.append(last_hour - _timedelta(hours=hour))
+        target_backup_times.append(last_hour - timedelta(hours=hour))
 
     for day in range(0, daily_backups):
-        target_backup_times.append(last_midnight - _timedelta(days=day))
+        target_backup_times.append(last_midnight - timedelta(days=day))
 
     for week in range(0, weekly_backups):
-        target_backup_times.append(last_sunday - _timedelta(weeks=week))
+        target_backup_times.append(last_sunday - timedelta(weeks=week))
 
     for month in range(0, monthly_backups):
-        target_backup_times.append(last_month - _timedelta(weeks=month * 4))
+        target_backup_times.append(last_month - timedelta(weeks=month * 4))
 
     for quart in range(0, quarterly_backups):
-        target_backup_times.append(last_year - _timedelta(weeks=quart * 16))
+        target_backup_times.append(last_year - timedelta(weeks=quart * 16))
 
     for year in range(0, yearly_backups):
-        target_backup_times.append(other_years - _timedelta(days=year * 365))
+        target_backup_times.append(other_years - timedelta(days=year * 365))
 
 
-    one_day = _timedelta(days=1)
+    one_day = timedelta(days=1)
     while start_of_month > oldest_snapshot_date:
         # append the start of the month to the list of snapshot dates to save:
         target_backup_times.append(start_of_month)
@@ -607,7 +608,7 @@ def _trim_snapshots(region_name, dry_run=False):
                                 # the 'preserve_snapshot' tag, delete it:
                                 try:
                                     conn.delete_snapshot(snap.id)
-                                except _EC2ResponseError as err:
+                                except EC2ResponseError as err:
                                     logger.exception(str(err))
                                 else:
                                     logger.info('Trimmed {0} {1} from {2}'
@@ -627,8 +628,9 @@ def _trim_snapshots(region_name, dry_run=False):
                     snap_found_for_this_time_period = False
 
 
+@task
 def delete_broken_snapshost():
-    for region in _regions():
+    for region in regions():
         conn = region.connect()
         filters = {'status': 'error'}
         snaps = conn.get_all_snapshots(owner='self', filters=filters)
@@ -637,6 +639,7 @@ def delete_broken_snapshost():
             snp.delete()
 
 
+@task
 def trim_snapshots(region_name=None, dry_run=False):
     """Delete old snapshots logarithmically back in time.
 
@@ -645,13 +648,14 @@ def trim_snapshots(region_name=None, dry_run=False):
     dry_run
         boolean, only print info about old snapshots to be deleted."""
     delete_broken_snapshost()
-    region = _get_region_by_name(region_name) if region_name else None
-    reg_names = [region.name] if region else (reg.name for reg in _regions())
+    region = get_region_by_name(region_name) if region_name else None
+    reg_names = [region.name] if region else (reg.name for reg in regions())
     for reg in reg_names:
         logger.info('Processing {0}'.format(reg))
         _trim_snapshots(reg)
 
 
+@task
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
                     security_groups=None):
     """Create AWS EC2 instance.
@@ -666,7 +670,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         name of key_pair to be granted access. Will be fetched from
         config by default, may be configured per region."""
 
-    region = _get_region_by_name(region_name)
+    region = get_region_by_name(region_name)
     conn = region.connect()
 
     ami_ptrn = config.get('DEFAULT', 'ami_ptrn')
@@ -678,7 +682,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     images = conn.get_all_images(filters=filters)
 
     # Filtering by latest version.
-    ptrn = _compile(config.get('DEFAULT', 'ami_regexp'))
+    ptrn = re.compile(config.get('DEFAULT', 'ami_regexp'))
     versions = set([ptrn.search(img.name).group('version') for img in images])
 
     def complement(year_month):
@@ -709,33 +713,33 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         security_groups=security_groups or [ssh_grp])
     assert len(reservation.instances) == 1, 'More than 1 instances created'
     inst = reservation.instances[0]
-    _wait_for(inst, 'running')
+    wait_for(inst, 'running')
     logger.info('{inst} created in {zone}'.format(inst=inst, zone=zone))
 
     return inst
 
 
-@_contextmanager
-def _create_temp_inst(region=None, zone=None, key_pair=None,
+@contextmanager
+def create_temp_inst(region=None, zone=None, key_pair=None,
                       security_groups=None, synchronously=False):
     if region and zone:
         assert zone in region.connect().get_all_zones(), (
             '{0} doesn\'t belong to {1}'.format(zone, region))
 
-    def _create_inst_in_zone(zone, key_pair, sec_grps):
+    def create_inst_in_zone(zone, key_pair, sec_grps):
         inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                                security_groups=sec_grps)
         inst.add_tag(config.get(zone.region.name, 'tag_name'), 'temporary')
         return inst
 
     if zone:
-        inst = _create_inst_in_zone(zone, key_pair, security_groups)
+        inst = create_inst_in_zone(zone, key_pair, security_groups)
     else:
         for zone in region.connect().get_all_zones():
             try:
-                inst = _create_inst_in_zone(zone, key_pair, security_groups)
-            except _BotoServerError as err:
-                logging.debug(_format_exc())
+                inst = create_inst_in_zone(zone, key_pair, security_groups)
+            except BotoServerError as err:
+                logging.debug(format_exc())
                 logging.error('{0} in {1}'.format(err, zone))
                 continue
             else:
@@ -746,10 +750,10 @@ def _create_temp_inst(region=None, zone=None, key_pair=None,
         logger.info('Terminating the {0} in {0.region}...'.format(inst))
         inst.terminate()
         if synchronously:
-            _wait_for(inst, 'terminated')
+            wait_for(inst, 'terminated')
 
 
-def _get_avail_dev(inst):
+def get_avail_dev(inst):
     """Return next unused device name."""
     inst.update()
     chars = lowercase
@@ -758,7 +762,25 @@ def _get_avail_dev(inst):
     return '/dev/sd{0}1'.format(chars[0])
 
 
-def _mount_volume(vol, mkfs=False):
+def get_vol_dev(vol):
+    """Return volume representation as attached OS device."""
+    if not vol.attach_data.instance_id:
+        return
+    inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    if not inst.public_dns_name:    # The instance is down.
+        return
+    key_filename = config.get(vol.region.name, 'key_filename')
+    env.update({'host_string': inst.public_dns_name,
+                'key_filename': key_filename})
+    attached_dev = vol.attach_data.device
+    natty_dev = attached_dev.replace('sd', 'xvd')
+    logger.debug(env, output)
+    for dev in [attached_dev, natty_dev]:
+        if _wait_for_exists(dev):
+            return dev
+
+
+def mount_volume(vol, mkfs=False):
 
     """Mount the device by SSH. Return mountpoint on success.
 
@@ -767,10 +789,10 @@ def _mount_volume(vol, mkfs=False):
 
     vol.update()
     assert vol.attach_data
-    inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'key_filename')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
-        dev = _get_vol_dev(vol)
+        dev = get_vol_dev(vol)
         mountpoint = dev.replace('/dev/', '/media/')
         _wait_for_sudo('mkdir -p {0}'.format(mountpoint))
         if mkfs:
@@ -785,8 +807,8 @@ def _mount_volume(vol, mkfs=False):
     return mountpoint
 
 
-@_contextmanager
-def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
+@contextmanager
+def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
 
     """Attach `snap` to `inst` or to new temporary instance.
 
@@ -796,35 +818,35 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
     newly created temporary instance for `key_pair` and with
     `security_groups`."""
 
-    _wait_for(snap, '100%', limit=10 * 60)
+    wait_for(snap, '100%', limit=10 * 60)
 
-    def _force_snap_attach(inst, snap):
+    def force_snap_attach(inst, snap):
         """Iterate over devices until successful attachment."""
         volumes_to_delete = []
-        while _get_avail_dev(inst):
+        while get_avail_dev(inst):
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
-            _add_tags(vol, snap.tags)
+            add_tags(vol, snap.tags)
             vol.add_tag(config.get(inst.region.name, 'tag_name'), 'temporary')
             volumes_to_delete.append(vol)
-            dev_name = _get_avail_dev(inst)
+            dev_name = get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
             vol.attach(inst.id, dev_name)
             try:
-                _wait_for(vol, 'attached', ['attach_data', 'status'], limit=60)
+                wait_for(vol, 'attached', ['attach_data', 'status'], limit=60)
             except StateNotChangedError:
                 logger.error('Attempt to attach as next device')
             else:
                 break
         return vol, volumes_to_delete
 
-    @_contextmanager
-    def _attach_snap_to_inst(inst, snap):
+    @contextmanager
+    def attach_snap_to_inst(inst, snap):
         """Cleanup volume(s)."""
-        _wait_for(inst, 'running')
+        wait_for(inst, 'running')
         try:
-            vol, volumes = _force_snap_attach(inst, snap)
-            mnt = _mount_volume(vol)
+            vol, volumes = force_snap_attach(inst, snap)
+            mnt = mount_volume(vol)
             yield vol, mnt
         except BaseException as err:
             logger.exception(str(err))
@@ -836,53 +858,36 @@ def _attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
-                _wait_for(vol, 'available')
+                wait_for(vol, 'available')
                 logger.info('Deleting {vol} in {vol.region}.'.format(vol=vol))
                 vol.delete()
 
     if inst:
-        with _attach_snap_to_inst(inst, snap) as (vol, mountpoint):
+        with attach_snap_to_inst(inst, snap) as (vol, mountpoint):
             yield vol, mountpoint
     else:
-        with _create_temp_inst(snap.region, key_pair=key_pair,
-                               security_groups=security_groups) as inst:
-            with _attach_snap_to_inst(inst, snap) as (vol, mountpoint):
+        with create_temp_inst(snap.region, key_pair=key_pair,
+                              security_groups=security_groups) as inst:
+            with attach_snap_to_inst(inst, snap) as (vol, mountpoint):
                 yield vol, mountpoint
 
 
-def _get_vol_dev(vol):
-    """Return volume representation as attached OS device."""
-    if not vol.attach_data.instance_id:
-        return
-    inst = _get_inst_by_id(vol.region, vol.attach_data.instance_id)
-    if not inst.public_dns_name:    # The instance is down.
-        return
-    key_filename = config.get(vol.region.name, 'key_filename')
-    env.update({'host_string': inst.public_dns_name,
-                'key_filename': key_filename})
-    attached_dev = vol.attach_data.device
-    natty_dev = attached_dev.replace('sd', 'xvd')
-    logger.debug(env, output)
-    for dev in [attached_dev, natty_dev]:
-        if _wait_for_exists(dev):
-            return dev
-
-
-@_contextmanager
-def _config_temp_ssh(conn):
+@contextmanager
+def config_temp_ssh(conn):
     config_name = '{region}-temp-ssh-{now}'.format(
         region=conn.region.name, now=datetime.utcnow().isoformat())
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
     key_pair.save('./')
-    _chmod(key_filename, 0600)
+    chmod(key_filename, 0600)
     try:
-        yield _realpath(key_filename)
+        yield realpath(key_filename)
     finally:
         key_pair.delete()
-        _remove(key_filename)
+        remove(key_filename)
 
 
+@task
 def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
 
     """Mount snapshot to temporary created instance or `inst_id`.
@@ -895,22 +900,22 @@ def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
         None."""
 
     if not region_name or not snap_id:
-        region_name, snap_id = _select_snapshot()
-    region = _get_region_by_name(region_name)
+        region_name, snap_id = select_snapshot()
+    region = get_region_by_name(region_name)
     conn = region.connect()
-    inst = _get_inst_by_id(region, inst_id) if inst_id else None
+    inst = get_inst_by_id(region, inst_id) if inst_id else None
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with _attach_snapshot(snap, inst) as (vol, mountpoint):
+    with attach_snapshot(snap, inst) as (vol, mountpoint):
         if mountpoint:
             info += ('\nand browse snapshot, mounted at {mountpoint}.')
         else:
             info += ('\nand mount {device}. NOTE: device name may be '
                      'altered by system.')
         key_file = config.get(region.name, 'key_filename')
-        inst = _get_inst_by_id(region, vol.attach_data.instance_id)
+        inst = get_inst_by_id(region, vol.attach_data.instance_id)
         logger.info(info.format(inst=inst, user=env.user, key=key_file,
             device=vol.attach_data.device, mountpoint=mountpoint))
 
@@ -920,11 +925,11 @@ def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
             pass
 
 
-def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
+def rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
     """Run `rsync` against mountpoints."""
     src_key_filename = config.get(src_inst.region.name, 'key_filename')
     dst_key_filename = config.get(dst_inst.region.name, 'key_filename')
-    with _config_temp_ssh(dst_inst.connection) as key_file:
+    with config_temp_ssh(dst_inst.connection) as key_file:
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
             _wait_for_sudo('cp /root/.ssh/authorized_keys '
@@ -934,7 +939,7 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
         with settings(host_string=src_inst.public_dns_name,
                       key_filename=src_key_filename):
             put(key_file, '.ssh/', mirror_local_mode=True)
-            dst_key_filename = _split(key_file)[1]
+            dst_key_filename = split(key_file)[1]
             cmd = (
                 'rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no"'
                 ' -aHAXz --delete --exclude /root/.bash_history '
@@ -952,7 +957,7 @@ def _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
                            '/root/.ssh/authorized_keys')
 
 
-def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
+def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
 
     """Update destination region from `src_vol`.
 
@@ -960,16 +965,16 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
     snapshot (if exists) of the same volume in destination region if
     ``delete_old`` is True."""
 
-    src_inst = _get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
-    dst_inst = _get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
-    _rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
+    src_inst = get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
+    dst_inst = get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
+    rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
     if dst_vol.snapshot_id:
         old_snap = dst_vol.connection.get_all_snapshots(
             [dst_vol.snapshot_id])[0]
     else:
         old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
-    _create_snapshot(dst_vol, description=src_snap.description, 
+    create_snapshot(dst_vol, description=src_snap.description,
                                     tags=src_snap.tags, synchronously=False)
     if old_snap and delete_old:
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
@@ -977,22 +982,23 @@ def _update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
         old_snap.delete()
 
 
-def _create_empty_snapshot(region, size):
+def create_empty_snapshot(region, size):
     """Format new filesystem."""
-    with _create_temp_inst(region) as inst:
+    with create_temp_inst(region) as inst:
         vol = region.connect().create_volume(size, inst.placement)
         earmarking_tag = config.get(region.name, 'tag_name')
         vol.add_tag(earmarking_tag, 'temporary')
-        vol.attach(inst.id, _get_avail_dev(inst))
-        _mount_volume(vol, mkfs=True)
+        vol.attach(inst.id, get_avail_dev(inst))
+        mount_volume(vol, mkfs=True)
         snap = vol.create_snapshot()
         snap.add_tag(earmarking_tag, 'temporary')
         vol.detach(True)
-        _wait_for(vol, 'available')
+        wait_for(vol, 'available')
         vol.delete()
         return snap
 
 
+@task
 def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                    src_inst=None, dst_inst=None):
 
@@ -1007,9 +1013,9 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     src_inst, dst_inst
         will be used instead of creating new for temporary."""
 
-    src_conn = _get_region_by_name(src_region_name).connect()
+    src_conn = get_region_by_name(src_region_name).connect()
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
-    dst_conn = _get_region_by_name(dst_region_name).connect()
+    dst_conn = get_region_by_name(dst_region_name).connect()
 
     info = 'Going to transmit {snap.volume_size} GiB {snap} {snap.description}'
     if src_snap.tags.get('Name'):
@@ -1020,26 +1026,27 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
 
     dst_snaps = dst_conn.get_all_snapshots(owner='self')
     dst_snaps = [snp for snp in dst_snaps if not snp.status == 'error']
-    src_vol = _get_snap_vol(src_snap)
-    vol_snaps = [snp for snp in dst_snaps if _get_snap_vol(snp) == src_vol]
+    src_vol = get_snap_vol(src_snap)
+    vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
     if vol_snaps:
-        dst_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
-        if _get_snap_time(dst_snap) >= _get_snap_time(src_snap):
+        dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
+        if get_snap_time(dst_snap) >= get_snap_time(src_snap):
             kwargs = dict(src=src_snap, dst=dst_snap, dst_reg=dst_conn.region)
             logger.info('Stepping over {src} - it\'s not newer than {dst} '
                         '{dst.description} in {dst_reg}'.format(**kwargs))
             return
     else:
-        dst_snap = _create_empty_snapshot(dst_conn.region,
-                                          src_snap.volume_size)
+        dst_snap = create_empty_snapshot(dst_conn.region,
+                                         src_snap.volume_size)
 
-    with _nested(_attach_snapshot(src_snap, inst=src_inst),
-                 _attach_snapshot(dst_snap, inst=dst_inst)) as (
+    with nested(attach_snapshot(src_snap, inst=src_inst),
+                attach_snapshot(dst_snap, inst=dst_inst)) as (
         (src_vol, src_mnt), (dst_vol, dst_mnt)):
-        _update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
-                     delete_old=not vol_snaps)  # Delete only empty snapshots.
+        update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
+                    delete_old=not vol_snaps)  # Delete only empty snapshots.
 
 
+@task
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
                  tag_value=None, native_only=True):
     """Duplicates latest snapshots with given tag into dst_region.
@@ -1053,27 +1060,27 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         config by default, may be configured per region;
     native
         sync only snapshots, created in the src_region_name."""
-    src_region = _get_region_by_name(src_region_name)
-    dst_region = _get_region_by_name(dst_region_name)
+    src_region = get_region_by_name(src_region_name)
+    dst_region = get_region_by_name(dst_region_name)
     conn = src_region.connect()
     tag_name = tag_name or config.get(src_region.name, 'tag_name')
     tag_value = tag_value or config.get(src_region.name, 'tag_value')
     filters = {'tag-key': tag_name, 'tag-value': tag_value}
     snaps = conn.get_all_snapshots(owner='self', filters=filters)
     snaps = [snp for snp in snaps if not snp.status == 'error']
-    _is_described = lambda snap: _get_snap_vol(snap) and _get_snap_time(snap)
+    _is_described = lambda snap: get_snap_vol(snap) and get_snap_time(snap)
     snaps = [snp for snp in snaps if _is_described(snp)]
     if native_only:
 
-        def _is_native(snap, region):
-            return _get_descr_attr(snap, 'Region') == region.name
-        snaps = [snp for snp in snaps if _is_native(snp, src_region)]
+        def is_native(snap, region):
+            return get_descr_attr(snap, 'Region') == region.name
+        snaps = [snp for snp in snaps if is_native(snp, src_region)]
 
-    with _nested(_create_temp_inst(src_region),
-                 _create_temp_inst(dst_region)) as (src_inst, dst_inst):
-        snaps = sorted(snaps, key=_get_snap_vol)    # Prepare for grouping.
-        for vol, vol_snaps in _groupby(snaps, _get_snap_vol):
-            latest_snap = sorted(vol_snaps, key=_get_snap_time)[-1]
+    with nested(create_temp_inst(src_region),
+                create_temp_inst(dst_region)) as (src_inst, dst_inst):
+        snaps = sorted(snaps, key=get_snap_vol)    # Prepare for grouping.
+        for vol, vol_snaps in groupby(snaps, get_snap_vol):
+            latest_snap = sorted(vol_snaps, key=get_snap_time)[-1]
             for inst in src_inst, dst_inst:
                 logger.debug('Rebooting {0} in {0.region} '
                              'to refresh attachments'.format(inst))
@@ -1087,6 +1094,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
                     *args))
 
 
+@task
 def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     """Create instance from specified AMI.
 
@@ -1097,13 +1105,13 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     inst_type
         by default will be fetched from AMI description or used
         't1.micro' if not mentioned in the description."""
-    conn = _get_region_by_name(region_name).connect()
+    conn = get_region_by_name(region_name).connect()
     image = conn.get_all_images([ami_id])[0]
-    inst_type = inst_type or _get_descr_attr(image, 'Type') or 't1.micro'
-    _security_groups = _prompt_to_select(
+    inst_type = inst_type or get_descr_attr(image, 'Type') or 't1.micro'
+    _security_groups = prompt_to_select(
         [sec.name for sec in conn.get_all_security_groups()],
         'Select security group')
-    _wait_for(image, 'available')
+    wait_for(image, 'available')
     reservation = image.run(
         key_name = config.get(conn.region.name, 'key_pair'),
         security_groups = [_security_groups, ],
@@ -1111,8 +1119,8 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         # XXX Kernel workaround, not tested with natty
         kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
-    _wait_for(new_instance, 'running')
-    _add_tags(new_instance, image.tags)
+    wait_for(new_instance, 'running')
+    add_tags(new_instance, image.tags)
     modify_instance_termination(conn.region.name, new_instance.id)
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
@@ -1120,6 +1128,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     logger.info(info.format(inst=new_instance, user=env.user, key=key_file))
 
 
+@task
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
                default_arch='x86_64', default_type='t1.micro'):
     """
@@ -1140,39 +1149,40 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         Used only if ``force`` is True.
     """
     if not region or not snap_id:
-        region, snap_id = _select_snapshot()
-    conn = _get_region_by_name(region).connect()
+        region, snap_id = select_snapshot()
+    conn = get_region_by_name(region).connect()
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
     # setup for building an EBS boot snapshot"
-    ebs = _EBSBlockDeviceType()
+    ebs = EBSBlockDeviceType()
     ebs.snapshot_id = snap_id
     ebs.delete_on_termination = True
-    block_map = _BlockDeviceMapping()
+    block_map = BlockDeviceMapping()
     block_map[root_dev] = ebs
 
     name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
-    _wait_for(snap, '100%', limit=10 * 60)
+    wait_for(snap, '100%', limit=10 * 60)
     result = conn.register_image(
         name=name,
         description=snap.description,
-        architecture=_get_descr_attr(snap, 'Arch') or default_arch,
-        root_device_name=_get_descr_attr(snap, 'Root_dev_name') or root_dev,
+        architecture=get_descr_attr(snap, 'Arch') or default_arch,
+        root_device_name=get_descr_attr(snap, 'Root_dev_name') or root_dev,
         block_device_map=block_map)
     image = conn.get_all_images(image_ids=[result, ])[0]
-    _add_tags(image, snap.tags)
+    add_tags(image, snap.tags)
 
     logger.info('The new AMI ID = {0}'.format(result))
 
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
-        instance_type = _get_descr_attr(snap, 'Type') or default_type
+        instance_type = get_descr_attr(snap, 'Type') or default_type
         launch_instance_from_ami(region, image.id, inst_type=instance_type)
 
 
+@task
 def modify_kernel(region, instance_id):
     """
     Modify old kernel for stopped instance
@@ -1193,8 +1203,8 @@ def modify_kernel(region, instance_id):
         us-west-1       i386    aki-99a0f1dc
     """
     key_filename = config.get(region, 'key_filename')
-    region = _get_region_by_name(region)
-    instance = _get_inst_by_id(region, instance_id)
+    region = get_region_by_name(region)
+    instance = get_inst_by_id(region, instance_id)
     env.update({
         'host_string': instance.public_dns_name,
         'key_filename': key_filename,
@@ -1204,6 +1214,6 @@ def modify_kernel(region, instance_id):
          'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
     kernel = config.get(region.name, 'kernel'+instance.architecture)
     instance.stop()
-    _wait_for(instance, 'stopped')
+    wait_for(instance, 'stopped')
     instance.modify_attribute('kernel', kernel)
     instance.start()
