@@ -1036,7 +1036,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     with _nested(_attach_snapshot(src_snap, inst=src_inst),
                  _attach_snapshot(dst_snap, inst=dst_inst)) as (
         (src_vol, src_mnt), (dst_vol, dst_mnt)):
-        _update_snap(src_vol, src_mnt, dst_vol, dst_mnt)
+        _update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
+                     delete_old=not vol_snaps)  # Delete only empty snapshots.
 
 
 def rsync_region(src_region_name, dst_region_name, tag_name=None,
