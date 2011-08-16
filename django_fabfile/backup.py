@@ -1037,7 +1037,6 @@ architecture, dev, name, release):
         elif release == 'natty':
             ext = '20110426'
         data = '/home/' + user + '/data'
-        #system = release + '-' + ext + '/' + architecture
         page = 'https://uec-images.ubuntu.com/releases/' \
                                 + release + '/release-' + ext + '/'
         image = release + '-server-uec-' + architecture + '.img'
@@ -1210,7 +1209,6 @@ architecture, dev, name, release):
             print "Adding apt entries for lucid....."
             with hide('running', 'stdout'):
                 listfile = work + '/root/etc/apt/sources.list'
-                print listfile
                 sudo('grep "lucid main" {listfile} | sed "'
                 's/lucid/maverick/g" >> {work}/root/etc/apt/sources.list.d'
                 '/bozohttpd.list'.format(listfile=listfile, work=work))
@@ -1329,8 +1327,10 @@ hostname=None):
             vol.detach(force=True)
             _wait_for(vol, ['status', ], 'available')
             vol.delete()
-            img = create_ami(region=region_name, snap_id=snap.id,
-            root_dev='/dev/sda', inst_arch=architecture,
-            inst_type=type, force='RUN', encrypted_root='1')
+            img = create_ami(region_name, snap.id, 'RUN',
+            root_dev='/dev/sda', inst_arch='x86_64', inst_type='t1.micro',
+            encrypted_root='1')
+            print "But before login you have to unlock instance by accessing"
+            print inst.public_dns_name
             img.deregister()
             snap.delete()
