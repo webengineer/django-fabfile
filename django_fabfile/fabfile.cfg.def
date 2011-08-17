@@ -24,6 +24,7 @@ yearly_backups = 10
 [us-east-1]
 kernelx86_64 = aki-427d952b
 kerneli386 = aki-407d9529
+kernel_encr_i386 = aki-4c7d9525
 kernel_encr_x86_64 = aki-4e7d9527
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
@@ -31,19 +32,23 @@ key_pair = regional-username
 [us-west-1]
 kernelx86_64 = aki-9ba0f1de
 kerneli386 = aki-99a0f1dc
+kernel_encr_i386 = aki-9da0f1d8
 kernel_encr_x86_64 = aki-9fa0f1da
 
 [ap-southeast-1]
 kernelx86_64 = aki-11d5aa43
 kerneli386 = aki-13d5aa41
+kernel_encr_i386 = aki-6fd5aa3d
 kernel_encr_x86_64 = aki-6dd5aa3f
 
 [eu-west-1]
 kernelx86_64 = aki-4feec43b
 kerneli386 = aki-4deec439
+kernel_encr_i386 = aki-47eec433
 kernel_encr_x86_64 = aki-41eec435
 
 [ap-northeast-1]
 kernelx86_64 = aki-d409a2d5
 kerneli386 = aki-d209a2d3
+kernel_encr_i386 = aki-d609a2d7
 kernel_encr_x86_64 = aki-d809a2d9
