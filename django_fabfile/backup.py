@@ -29,6 +29,7 @@ USAGE:
 import logging
 import logging.handlers
 import os
+import os.path
 import re
 import sys
 
@@ -37,8 +38,6 @@ from ConfigParser import ConfigParser, NoOptionError
 from contextlib import contextmanager, nested
 from itertools import groupby
 from json import dumps, loads
-from os import chmod, remove
-from os.path import realpath, split
 from pprint import PrettyPrinter
 from pydoc import pager
 from string import lowercase
@@ -238,9 +237,9 @@ try:
 except NoOptionError as err:
     warn(str(err))
 else:
-    _wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
+    wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
                                     pause=ssh_timeout_interval)(sudo)
-    _wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
+    wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
                                       pause=ssh_timeout_interval)(exists)
 
 
@@ -781,7 +780,7 @@ def get_vol_dev(vol):
     natty_dev = attached_dev.replace('sd', 'xvd')
     logger.debug(env, output)
     for dev in [attached_dev, natty_dev]:
-        if _wait_for_exists(dev):
+        if wait_for_exists(dev):
             return dev
 
 
@@ -799,14 +798,14 @@ def mount_volume(vol, mkfs=False):
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
         dev = get_vol_dev(vol)
         mountpoint = dev.replace('/dev/', '/media/')
-        _wait_for_sudo('mkdir -p {0}'.format(mountpoint))
+        wait_for_sudo('mkdir -p {0}'.format(mountpoint))
         if mkfs:
-            _wait_for_sudo('mkfs.ext3 {dev}'.format(dev=dev))
+            wait_for_sudo('mkfs.ext3 {dev}'.format(dev=dev))
         """Add disk label for normal boot on created volume"""
-        _wait_for_sudo('e2label {dev} uec-rootfs'.format(dev=dev))
-        _wait_for_sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
+        wait_for_sudo('e2label {dev} uec-rootfs'.format(dev=dev))
+        wait_for_sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
         if mkfs:
-            _wait_for_sudo('chown -R {user}:{user} {mnt}'.format(
+            wait_for_sudo('chown -R {user}:{user} {mnt}'.format(
                            user=env.user, mnt=mountpoint))
     logger.debug('Mounted {0} to {1} at {2}'.format(vol, inst, mountpoint))
     return mountpoint
@@ -859,7 +858,7 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             key_filename = config.get(inst.region.name, 'key_filename')
             with settings(host_string=inst.public_dns_name,
                           key_filename=key_filename):
-                _wait_for_sudo('umount {0}'.format(mnt))
+                wait_for_sudo('umount {0}'.format(mnt))
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
@@ -884,12 +883,12 @@ def config_temp_ssh(conn):
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
     key_pair.save('./')
-    chmod(key_filename, 0600)
+    os.chmod(key_filename, 0600)
     try:
-        yield realpath(key_filename)
+        yield os.path.realpath(key_filename)
     finally:
         key_pair.delete()
-        remove(key_filename)
+        os.remove(key_filename)
 
 
 @task
@@ -938,14 +937,14 @@ def rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
     with config_temp_ssh(dst_inst.connection) as key_file:
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-            _wait_for_sudo('cp /root/.ssh/authorized_keys '
-                           '/root/.ssh/authorized_keys.bak')
+            wait_for_sudo('cp /root/.ssh/authorized_keys '
+                          '/root/.ssh/authorized_keys.bak')
             pub_key = local('ssh-keygen -y -f {0}'.format(key_file), True)
             append('/root/.ssh/authorized_keys', pub_key, use_sudo=True)
         with settings(host_string=src_inst.public_dns_name,
                       key_filename=src_key_filename):
             put(key_file, '.ssh/', mirror_local_mode=True)
-            dst_key_filename = split(key_file)[1]
+            dst_key_filename = os.path.split(key_file)[1]
             cmd = (
                 'rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no"'
                 ' -aHAXz --delete --exclude /root/.bash_history '
@@ -954,13 +953,13 @@ def rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
                 '--exclude /etc/udev/rules.d/*persistent-net.rules '
                 '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
                 '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
-            _wait_for_sudo(cmd.format(
+            wait_for_sudo(cmd.format(
                 rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                 key_file=dst_key_filename, src_mnt=src_mnt))
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-            _wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
-                           '/root/.ssh/authorized_keys')
+            wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
+                          '/root/.ssh/authorized_keys')
 
 
 def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
@@ -1511,13 +1510,14 @@ hostname=None):
     Process of creation is about 20 minutes long.
     For now you can create only lucid x64 instance.
     """
-    region = _get_region_by_name(region_name)
+    region = get_region_by_name(region_name)
     conn = region.connect()
 
-    with _config_temp_ssh(conn) as key_filename:
-        key_pair = _splitext(_split(key_filename)[1])[0]
+    with config_temp_ssh(conn) as key_filename:
+        key_pair = os.path.splitext(os.path.split(key_filename)[1])[0]
         zn = conn.get_all_zones()[-1]
-        with _create_temp_inst(zn, key_pair, [ssh_grp]) as inst:
+        ssh_grp = config.get('DEFAULT', 'ssh_security_group')
+        with create_temp_inst(zn, key_pair, [ssh_grp]) as inst:
             vol = conn.create_volume(size=volume_size, zone=zn)
             dev = get_avail_dev_encr(inst)
             vol.attach(inst.id, dev)
@@ -1528,13 +1528,13 @@ hostname=None):
             make_encrypted_ubuntu(inst.public_dns_name, key_filename,
                           'ubuntu', hostname, arch, dev, name, release)
             snap = vol.create_snapshot()
-            _wait_for(snap, ['status', ], 'completed')
+            wait_for(snap, ['status', ], 'completed')
             vol.detach(force=True)
-            _wait_for(vol, ['status', ], 'available')
+            wait_for(vol, ['status', ], 'available')
             vol.delete()
-            img = create_ami(region_name, snap.id, 'RUN',
-            root_dev='/dev/sda', default_arch='x86_64', default_type='t1.micro',
-            encrypted_root='1')
+            img = create_ami(region_name, snap.id, 'RUN', root_dev='/dev/sda',
+                             default_arch='x86_64', default_type='t1.micro',
+                             encrypted_root='1')
             print "But before login you have to unlock instance by accessing"
             print inst.public_dns_name
             img.deregister()
