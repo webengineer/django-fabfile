@@ -482,7 +482,7 @@ def backup_instance(region_name, instance_id=None, instance=None,
     instance, instance_id
         either `instance_id` or `instance` argument should be specified;
     synchronously
-        wait for completion."""
+        wait for completion. False by default."""
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     region = get_region_by_name(region_name)
@@ -506,13 +506,13 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
     tag_name, tag_value
         will be fetched from config by default, may be configured
         per region;
-    asynchronously
-        will be accomplished without checking results. NOTE: when
-        ``create_ami`` task compiles AMI from several snapshots it
-        restricts snapshot start_time difference with 10 minutes
-        interval at most. Snapshot completion may take much more time
-        and due to this only asynchronously generated snapshots will be
-        assembled assurely."""
+    synchronously
+        will be accomplished without checking results. False by default.
+        NOTE: when ``create_ami`` task compiles AMI from several
+        snapshots it restricts snapshot start_time difference with 10
+        minutes interval at most. Snapshot completion may take much more
+        time and due to this only asynchronously generated snapshots
+        will be assembled assurely."""
     snapshots = []
     region = get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in regions())
