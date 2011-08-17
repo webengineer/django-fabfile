@@ -1,3 +1,51 @@
+Version 2011.08.10.1
+--------------------
+
+Changed snapshots creation with function
+``django_fabfile.backup.backup_instances_by_tag`` to wait for successful
+completion in order to avoid snapshots with status "error".
+
+Version 2011.08.08.1
+--------------------
+
+Updated logging setup with option ``logging_folder``.
+
+Version 2011.08.03.4
+--------------------
+
+Added `minutes_for_snap` option to `DEFAULT` section of config.
+
+Version 2011.08.01.2
+--------------------
+
+Added `django_fabfile.backup.update_volumes_tags` for cloning tags from
+instances.
+
+Version 2011.08.01.1
+--------------------
+
+*XXX* Requirements updated with patched version of Fabric - please
+install it from http://pypi.odeskps.com/simple/odeskps-fabric/ using::
+
+    pip install odeskps-Fabric
+
+Version 2011.07.26.1
+--------------------
+
+Added logging to file with rotation. Note: logging to a single file from
+multiple processes is not supported.
+
+Version 2011.07.24.1
+--------------------
+
+Added configuration option `username` in new `odesk` section.
+
+Version 2011.07.21.1
+--------------------
+
+Added `django_fabfile.switchdb` module with commands for switching current
+primary DB server.
+
 Version 2011.07.18.1
 --------------------
 
