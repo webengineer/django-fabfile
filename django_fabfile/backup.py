@@ -392,22 +392,30 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
     tags
         tags to be added to snapshot. Will be cloned from volume by
         default."""
-    if not description and vol.attach_data:
-        instance = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    if vol.attach_data:
+        inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    else:
+        inst = None
+    if not description and inst:
         description = dumps({
             'Volume': vol.id,
             'Region': vol.region.name,
             'Device': vol.attach_data.device,
-            'Instance': instance.id,
-            'Type': instance.instance_type,
-            'Arch': instance.architecture,
-            'Root_dev_name': instance.root_device_name,
+            'Instance': inst.id,
+            'Type': inst.instance_type,
+            'Arch': inst.architecture,
+            'Root_dev_name': inst.root_device_name,
             'Time': _now(),
             })
 
     def initiate_snapshot():
         snapshot = vol.create_snapshot(description)
-        add_tags(snapshot, tags or vol.tags)
+        if tags:
+            add_tags(snapshot, tags)
+        else:
+            if inst:
+                add_tags(snapshot, inst.tags)
+            add_tags(snapshot, vol.tags)
         logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
