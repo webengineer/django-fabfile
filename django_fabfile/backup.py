@@ -246,7 +246,8 @@ else:
 
 def add_tags(res, tags):
     for tag in tags:
-        res.add_tag(tag, tags[tag])
+        if tags[tag]:
+            res.add_tag(tag, tags[tag])
     logger.debug('Tags added to {0}'.format(res))
 
 
