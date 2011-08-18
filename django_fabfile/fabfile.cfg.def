@@ -15,6 +15,22 @@ tag_name = Earmarking
 tag_value = production
 ubuntu_aws_account = 099720109477
 username = ubuntu
+lucid_ext = 20110719
+natty_ext = 20110426
+
+[user_data] 
+user_data=#!/bin/bash -ex
+    sudo ln -fs /usr/share/zoneinfo/PST8PDT /etc/localtime
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install unattended-upgrades bsd-mailx mc htop zabbix-agent python-pip python-setuptools fail2ban
+    sudo echo -e 'APT::Periodic::Enable "1";\nAPT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::AutocleanInterval "0";\nAPT::Periodic::Download-Upgradeable-Packages "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | sudo tee /etc/apt/apt.conf.d/10periodic
+    sudo sed -i 's/\/\/Unattended-Upgrade::Mail "root@localhost";/Unattended-Upgrade::Mail "monitoring@odeskps.com";/'  /etc/apt/apt.conf.d/50unattended-upgrades
+    sudo env DEBIAN_FRONTEND=noninteractive pip install --upgrade https://bitbucket.org/rvs/ztc/downloads/ztc-11.07.1.tar.gz
+    sudo mkdir /var/log/zabbix && sudo chmod 777 /var/log/zabbix
+    sudo sed -i "s/Server=localhost/Server=zabbix.odeskps.com,internal.infra.odeskps.com,184.73.177.59/" /etc/zabbix/zabbix_agentd.conf
+    sudo echo "Include=/etc/zabbix-agent.d/" >> /etc/zabbix/zabbix_agentd.conf
+    sudo /etc/init.d/fail2ban restart
+    sudo /etc/init.d/zabbix-agent restart
 
 [odesk]
 username = odesk-username
