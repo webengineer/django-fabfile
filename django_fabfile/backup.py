@@ -31,7 +31,6 @@ import logging.handlers
 import os
 import re
 import sys
-
 from datetime import timedelta, datetime
 from ConfigParser import ConfigParser, NoOptionError
 from contextlib import contextmanager, nested
@@ -259,11 +258,17 @@ def get_descr_attr(resource, attr):
 
 
 def get_snap_vol(snap):
-    return get_descr_attr(snap, 'Volume')
+    return get_descr_attr(snap, 'Volume') or snap.volume_id
 
 
 def get_snap_time(snap):
-    return get_descr_attr(snap, 'Time')
+    for format_ in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f'):
+        try:
+            return datetime.strptime(get_descr_attr(snap, 'Time'), format_)
+        except (TypeError, ValueError):
+            continue
+    # Use attribute if can't parse description.
+    return datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
 
 
 def get_inst_by_id(region, instance_id):
@@ -568,7 +573,7 @@ def _trim_snapshots(region_name, dry_run=False):
         # the snapshot name and the volume name are the same.
         # The snapshot name is set from the volume
         # name at the time the snapshot is taken
-        volume_name = snap.volume_id
+        volume_name = get_snap_vol(snap)
 
         if volume_name:
             # only examine snapshots that have a volume name
@@ -588,17 +593,15 @@ def _trim_snapshots(region_name, dry_run=False):
         snaps = snaps[:-1]
         # never delete the newest snapshot, so remove it from consideration
 
-        time_period_number = 0
+        time_period_num = 0
         snap_found_for_this_time_period = False
         for snap in snaps:
             check_this_snap = True
 
             while (check_this_snap and
-                  time_period_number < target_backup_times.__len__()):
-                snap_date = datetime.strptime(snap.start_time,
-                                      '%Y-%m-%dT%H:%M:%S.000Z')
+                   time_period_num < target_backup_times.__len__()):
 
-                if snap_date < target_backup_times[time_period_number]:
+                if get_snap_time(snap) < target_backup_times[time_period_num]:
                     # the snap date is before the cutoff date.
                     # Figure out if it's the first snap in this
                     # date range and act accordingly
@@ -632,12 +635,12 @@ def _trim_snapshots(region_name, dry_run=False):
                 else:
                     # the snap is after the cutoff date.
                     # Check it against the next cutoff date
-                    time_period_number += 1
+                    time_period_num += 1
                     snap_found_for_this_time_period = False
 
 
 @task
-def delete_broken_snapshost():
+def delete_broken_snapshots():
     for region in regions():
         conn = region.connect()
         filters = {'status': 'error'}
@@ -655,12 +658,12 @@ def trim_snapshots(region_name=None, dry_run=False):
         by default process all regions;
     dry_run
         boolean, only print info about old snapshots to be deleted."""
-    delete_broken_snapshost()
+    delete_broken_snapshots()
     region = get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in regions())
     for reg in reg_names:
         logger.info('Processing {0}'.format(reg))
-        _trim_snapshots(reg)
+        _trim_snapshots(reg, dry_run=dry_run)
 
 
 @task
@@ -1154,7 +1157,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         architecture to use if not mentioned in snapshot description;
     default_type
         instance type to use if not mentioned in snapshot description.
-        Used only if ``force`` is True.
+        Used only if ``force`` is "RUN".
     """
     if not region or not snap_id:
         region, snap_id = select_snapshot()
