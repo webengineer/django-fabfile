@@ -1175,9 +1175,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         key_name=config.get(conn.region.name, 'key_pair'),
         security_groups=sec_grps,
         instance_type=inst_type,
-        user_data=user_data,
-        # XXX Kernel workaround, not tested with natty
-        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
+        user_data=user_data)
     new_instance = reservation.instances[0]
     wait_for(new_instance, 'running')
     add_tags(new_instance, image.tags)
@@ -1226,7 +1224,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
                       reverse=True) if snapshots else None
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
-    kernel = get_latest_aki(conn, arch).id
+    kernel= config.get(conn.region.name, 'kernel' + arch)
     dev = re.match(r'^/dev/sd[a-z]$', _device)
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
