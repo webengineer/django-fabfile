@@ -16,6 +16,8 @@ tag_name = Earmarking
 tag_value = production
 ubuntu_aws_account = 099720109477
 username = ubuntu
+lucid_ext = 20110719
+natty_ext = 20110426
 
 [user_data] 
 user_data=#!/bin/bash -ex

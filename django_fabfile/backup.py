@@ -37,7 +37,6 @@ from ConfigParser import SafeConfigParser, NoOptionError
 from contextlib import contextmanager, nested
 from itertools import groupby
 from json import dumps, loads
-from operator import attrgetter
 from pprint import PrettyPrinter
 from pydoc import pager
 from string import lowercase
@@ -288,17 +287,6 @@ def get_snap_time(snap):
             continue
     # Use attribute if can't parse description.
     return datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
-
-
-def get_latest_aki(conn, architecture):
-    ubuntu_aws_account = config.get('DEFAULT', 'ubuntu_aws_account')
-    aki_ptrn = config.get('DEFAULT', 'aki_ptrn')
-    kernels = conn.get_all_images(filters={
-        'image-type': 'kernel',
-        'architecture': architecture,
-        'owner-id': ubuntu_aws_account,
-        'name': aki_ptrn})
-    return sorted(kernels, key=attrgetter('name'))[-1]
 
 
 def get_inst_by_id(region, instance_id):
