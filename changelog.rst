@@ -1,3 +1,20 @@
+Version 2011.08.10.1
+--------------------
+
+Changed snapshots creation with function
+``django_fabfile.backup.backup_instances_by_tag`` to wait for successful
+completion in order to avoid snapshots with status "error".
+
+Version 2011.08.08.1
+--------------------
+
+Updated logging setup with option ``logging_folder``.
+
+Version 2011.08.03.4
+--------------------
+
+Added `minutes_for_snap` option to `DEFAULT` section of config.
+
 Version 2011.08.01.2
 --------------------
 
