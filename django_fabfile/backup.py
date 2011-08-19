@@ -498,7 +498,7 @@ def backup_instance(region_name, instance_id=None, instance=None,
 
 @task
 def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
-                            asynchronously=False):
+                            synchronously=False):
     """Creates backup for all instances with given tag in region.
 
     region_name
@@ -507,7 +507,12 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         will be fetched from config by default, may be configured
         per region;
     asynchronously
-        will be accomplished without checking results."""
+        will be accomplished without checking results. NOTE: when
+        ``create_ami`` task compiles AMI from several snapshots it
+        restricts snapshot start_time difference with 10 minutes
+        interval at most. Snapshot completion may take much more time
+        and due to this only asynchronously generated snapshots will be
+        assembled assurely."""
     snapshots = []
     region = get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in regions())
@@ -519,7 +524,7 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
                    'tag-value': tag_value}
         for tag in conn.get_all_tags(filters=filters):
             snapshots += backup_instance(reg, instance_id=tag.res_id,
-                                         synchronously=not asynchronously)
+                                         synchronously=synchronously)
     return snapshots
 
 
