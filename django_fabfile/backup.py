@@ -32,15 +32,12 @@ import os
 import os.path
 import re
 import sys
-
 from datetime import timedelta, datetime
 from ConfigParser import SafeConfigParser, NoOptionError
 from contextlib import contextmanager, nested
 from itertools import groupby
 from json import dumps, loads
 from operator import attrgetter
-from os import chmod, remove
-from os.path import realpath, split
 from pprint import PrettyPrinter
 from pydoc import pager
 from string import lowercase
@@ -115,11 +112,14 @@ logger.addHandler(handler)
 _now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
-def prompt_to_select(choices, query='Select from', paging=False):
+def prompt_to_select(choices, query='Select from', paging=False,
+                     multiple=False):
     """Prompt to select an option from provided choices.
 
-    choices: list or dict. If dict, then choice will be made among keys.
-    paging: render long list with pagination.
+    choices
+        list or dict. If dict, then choice will be made among keys.
+    paging
+        render long list with pagination.
 
     Return solely possible value instantly without prompting."""
     keys = list(choices)
@@ -128,16 +128,24 @@ def prompt_to_select(choices, query='Select from', paging=False):
     assert len(keys), 'No choices provided'
     if len(keys) == 1:
         return keys[0]
-    picked = None
-    while not picked in keys:
-        if paging:
-            pp = PrettyPrinter()
-            pager(query + '\n' + pp.pformat(choices))
-            text = 'Enter your choice or press Return to view options again'
-        else:
-            text = '{query} {choices}'.format(query=query, choices=choices)
-        picked = prompt(text)
-    return picked
+
+    def in_list(input_, avail_list, multiple=False):
+        selected_list = re.split('[\s,]+', input_)
+        if not multiple:
+            assert len(selected_list) == 1, 'Only one item allowed'
+        for item in selected_list:
+            if not item in avail_list:
+                raise ValueError('{0} not in {1}'.format(item, avail_list))
+        return selected_list if multiple else selected_list[0]
+
+    if paging:
+        pp = PrettyPrinter()
+        pager(query + '\n' + pp.pformat(choices))
+        text = 'Enter your choice or press Return to view options again'
+    else:
+        text = '{query} {choices}'.format(query=query, choices=choices)
+    input_in_list = lambda input_: in_list(input_, choices, multiple)
+    return prompt(text, validate=input_in_list)
 
 
 class StateNotChangedError(Exception):
@@ -248,7 +256,8 @@ else:
 
 def add_tags(res, tags):
     for tag in tags:
-        res.add_tag(tag, tags[tag])
+        if tags[tag]:
+            res.add_tag(tag, tags[tag])
     logger.debug('Tags added to {0}'.format(res))
 
 
@@ -290,6 +299,7 @@ def get_latest_aki(conn, architecture):
         'owner-id': ubuntu_aws_account,
         'name': aki_ptrn})
     return sorted(kernels, key=attrgetter('name'))[-1]
+
 
 def get_inst_by_id(region, instance_id):
     conn = region.connect()
@@ -362,7 +372,7 @@ def modify_instance_termination(region, instance_id):
 
 def select_snapshot():
     region_name = prompt_to_select([reg.name for reg in regions()],
-                                        'Select region from')
+                                   'Select region from')
     snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
                      'otherwise)')
     if snap_id:
@@ -381,7 +391,7 @@ def select_snapshot():
         'IP Address': inst.ip_address,
         'DNS Name': inst.public_dns_name}) for inst in instances_list)
     instance_id = prompt_to_select(instances, 'Select instance ID from',
-                                    paging=True)
+                                   paging=True)
 
     all_instances = get_all_instances(region_name)
     inst = [inst for inst in all_instances if inst.id == instance_id][0]
@@ -392,7 +402,7 @@ def select_snapshot():
         'Snapshot ID': dev.snapshot_id}) for dev in
                                             inst.block_device_mapping.values())
     volume_id = prompt_to_select(volumes, 'Select volume ID from',
-                                  paging=True)
+                                 paging=True)
 
     all_snaps = get_all_snapshots(region_name)
     snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
@@ -401,7 +411,7 @@ def select_snapshot():
                             'Description': snap.description}) for snap in
                                                                     snaps_list)
     return region_name, prompt_to_select(snaps, 'Select snapshot ID from',
-                                          paging=True)
+                                         paging=True)
 
 
 def create_snapshot(vol, description='', tags=None, synchronously=True):
@@ -417,22 +427,30 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
     tags
         tags to be added to snapshot. Will be cloned from volume by
         default."""
-    if not description and vol.attach_data:
-        instance = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    if vol.attach_data:
+        inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    else:
+        inst = None
+    if not description and inst:
         description = dumps({
             'Volume': vol.id,
             'Region': vol.region.name,
             'Device': vol.attach_data.device,
-            'Instance': instance.id,
-            'Type': instance.instance_type,
-            'Arch': instance.architecture,
-            'Root_dev_name': instance.root_device_name,
+            'Instance': inst.id,
+            'Type': inst.instance_type,
+            'Arch': inst.architecture,
+            'Root_dev_name': inst.root_device_name,
             'Time': _now(),
             })
 
     def initiate_snapshot():
         snapshot = vol.create_snapshot(description)
-        add_tags(snapshot, tags or vol.tags)
+        if tags:
+            add_tags(snapshot, tags)
+        else:
+            if inst:
+                add_tags(snapshot, inst.tags)
+            add_tags(snapshot, vol.tags)
         logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
@@ -584,7 +602,7 @@ def _trim_snapshots(region_name, dry_run=False):
         # the snapshot name and the volume name are the same.
         # The snapshot name is set from the volume
         # name at the time the snapshot is taken
-        volume_name = snap.volume_id
+        volume_name = get_snap_vol(snap)
 
         if volume_name:
             # only examine snapshots that have a volume name
@@ -603,17 +621,15 @@ def _trim_snapshots(region_name, dry_run=False):
         snaps = snaps[:-1]
         # never delete the newest snapshot, so remove it from consideration
 
-        time_period_number = 0
+        time_period_num = 0
         snap_found_for_this_time_period = False
         for snap in snaps:
             check_this_snap = True
 
             while (check_this_snap and
-                  time_period_number < target_backup_times.__len__()):
-                snap_date = datetime.strptime(snap.start_time,
-                                      '%Y-%m-%dT%H:%M:%S.000Z')
+                   time_period_num < target_backup_times.__len__()):
 
-                if snap_date < target_backup_times[time_period_number]:
+                if get_snap_time(snap) < target_backup_times[time_period_num]:
                     # the snap date is before the cutoff date.
                     # Figure out if it's the first snap in this
                     # date range and act accordingly
@@ -647,12 +663,13 @@ def _trim_snapshots(region_name, dry_run=False):
                 else:
                     # the snap is after the cutoff date.
                     # Check it against the next cutoff date
-                    time_period_number += 1
+                    time_period_num += 1
                     snap_found_for_this_time_period = False
 
 
 @task
-def delete_broken_snapshost():
+def delete_broken_snapshots():
+    """Delete snapshots with status 'error'."""
     for region in regions():
         conn = region.connect()
         filters = {'status': 'error'}
@@ -670,12 +687,12 @@ def trim_snapshots(region_name=None, dry_run=False):
         by default process all regions;
     dry_run
         boolean, only print info about old snapshots to be deleted."""
-    delete_broken_snapshost()
+    delete_broken_snapshots()
     region = get_region_by_name(region_name) if region_name else None
     reg_names = [region.name] if region else (reg.name for reg in regions())
     for reg in reg_names:
         logger.info('Processing {0}'.format(reg))
-        _trim_snapshots(reg)
+        _trim_snapshots(reg, dry_run=dry_run)
 
 
 @task
@@ -1144,16 +1161,18 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     conn = get_region_by_name(region_name).connect()
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or get_descr_attr(image, 'Type') or 't1.micro'
-    _security_groups = prompt_to_select(
-        [sec.name for sec in conn.get_all_security_groups()],
-        'Select security group')
+
+    avail_grps = [sec.name for sec in conn.get_all_security_groups()]
+    sec_grps = prompt_to_select(avail_grps, 'Select security groups',
+                                multiple=True)
     wait_for(image, 'available')
     reservation = image.run(
         key_name=config.get(conn.region.name, 'key_pair'),
-        security_groups=[_security_groups, ],
+        security_groups=sec_grps,
         instance_type=inst_type,
         user_data=user_data,
-        kernel_id=image.kernel_id)
+        # XXX Kernel workaround, not tested with natty
+        kernel_id=config.get(conn.region.name, 'kernel' + image.architecture))
     new_instance = reservation.instances[0]
     wait_for(new_instance, 'running')
     add_tags(new_instance, image.tags)
@@ -1196,14 +1215,14 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     snaps = conn.get_all_snapshots(owner='self')
     snapshots = [snp for snp in snaps if
         get_snap_instance(snp) == instance_id and
-        get_snap_device(snp) !=_device and
+        get_snap_device(snp) != _device and
         abs(get_snap_time(snap) - get_snap_time(snp)) <= timedelta(minutes=10)]
     snapshot = sorted(snapshots, key=get_snap_time,
                       reverse=True) if snapshots else None
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
     kernel = get_latest_aki(conn, arch).id
-    dev = re.match(r'^/dev/sd[a-z]$',_device)
+    dev = re.match(r'^/dev/sd[a-z]$', _device)
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
     ebs = EBSBlockDeviceType()
@@ -1243,6 +1262,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         instance_type = get_descr_attr(snap, 'Type') or default_type
         launch_instance_from_ami(region, image.id, inst_type=instance_type)
     return image
+
 
 @task
 def modify_kernel(region, instance_id):
@@ -1293,7 +1313,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
         pattern = '<a href=\\"([^\\"]*-' \
                   + architecture + '\.tar\.gz)\\">\\1</a>'
         bootlabel = "bootfs"
-        
+
         def check(message, program, sums):
             with hide('running', 'stdout'):
                 options = '--keyring=' + data + '/encrypted_root/uecimage.gpg'
@@ -1444,7 +1464,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                  root_device=root_device, work=work))
             sudo('perl -i -p - "{0}/root/etc/initramfs-tools/boot/'
                  'cryptsetup.sh" <<- EOT\ns[^(cs_host=).*][\\$1"{1}"];'
-                '\nEOT\n'.format(work,hostname))
+                '\nEOT\n'.format(work, hostname))
             sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
             if release == 'lucid':
                 logger.info('Adding apt entries for lucid.....')
@@ -1519,6 +1539,8 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
                              type='t1.micro', name='encr_root',
                              hostname="boot.odeskps.com", pw1=None, pw2=None):
     """
+    Creates ubuntu instance with luks-encryted root volume.
+
     region_name
         Region where you want to create instance;
     release
@@ -1533,7 +1555,7 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         Hostname that will be used for access unlocking root volume;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
-    Creates ubuntu instance with luks-encryted root volume.
+
     To unlock go to https://ip_address_of_instance (only after reboot).
     You can set up to 8 passwords. Defaut boot.key and boot.crt created for
     *.amazonaws.com so must work for all instances.
