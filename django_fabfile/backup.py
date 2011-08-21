@@ -821,7 +821,7 @@ def get_vol_dev(vol):
             return dev
 
 
-def mount_volume(vol, mkfs=False):
+def mount_volume(vol, mkfs=False, mkrootfs=False):
 
     """Mount the device by SSH. Return mountpoint on success.
 
@@ -839,7 +839,11 @@ def mount_volume(vol, mkfs=False):
         if mkfs:
             wait_for_sudo('mkfs.ext3 {dev}'.format(dev=dev))
         """Add disk label for normal boot on created volume"""
-        wait_for_sudo('e2label {dev} uec-rootfs'.format(dev=dev))
+        logger.debug('mkrootfs value in mount_volume {0}'.format(mkrootfs))
+        
+        if mkrootfs:
+            wait_for_sudo('e2label {dev} uec-rootfs'.format(dev=dev))
+            
         wait_for_sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
         if mkfs:
             wait_for_sudo('chown -R {user}:{user} {mnt}'.format(
@@ -849,7 +853,8 @@ def mount_volume(vol, mkfs=False):
 
 
 @contextmanager
-def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
+def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
+                    mkrootfs=False):
 
     """Attach `snap` to `inst` or to new temporary instance.
 
@@ -887,7 +892,8 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
         wait_for(inst, 'running')
         try:
             vol, volumes = force_snap_attach(inst, snap)
-            mnt = mount_volume(vol)
+            logger.debug('mkrootfs value {0}'.format(mkrootfs))
+            mnt = mount_volume(vol, mkrootfs=mkrootfs)
             yield vol, mnt
         except BaseException as err:
             logger.exception(str(err))
@@ -1024,14 +1030,14 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
         old_snap.delete()
 
 
-def create_empty_snapshot(region, size):
+def create_empty_snapshot(region, size, mkrootfs=False):
     """Format new filesystem."""
     with create_temp_inst(region) as inst:
         vol = region.connect().create_volume(size, inst.placement)
         earmarking_tag = config.get(region.name, 'tag_name')
         vol.add_tag(earmarking_tag, 'temporary')
         vol.attach(inst.id, get_avail_dev(inst))
-        mount_volume(vol, mkfs=True)
+        mount_volume(vol, mkfs=True, mkrootfs=mkrootfs)
         snap = vol.create_snapshot()
         snap.add_tag(earmarking_tag, 'temporary')
         vol.detach(True)
@@ -1070,6 +1076,16 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     dst_snaps = [snp for snp in dst_snaps if not snp.status == 'error']
     src_vol = get_snap_vol(src_snap)
     vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
+    _device = get_snap_device(src_snap)
+    logger.debug('device in rsync_snapshot {0}'.format(_device))
+    mkrootfs = False
+    try:
+        _dev = re.match(r'^/dev/sda[0-9]$', _device)
+    except:
+        _dev = None
+    if _dev:
+        mkrootfs = True
+
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
         if get_snap_time(dst_snap) >= get_snap_time(src_snap):
@@ -1079,10 +1095,11 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
             return
     else:
         dst_snap = create_empty_snapshot(dst_conn.region,
-                                         src_snap.volume_size)
+                                         src_snap.volume_size, mkrootfs)
 
-    with nested(attach_snapshot(src_snap, inst=src_inst),
-                attach_snapshot(dst_snap, inst=dst_inst)) as (
+    with nested(attach_snapshot(src_snap, inst=src_inst, mkrootfs=mkrootfs),
+                attach_snapshot(dst_snap, inst=dst_inst,
+                mkrootfs=mkrootfs)) as (
         (src_vol, src_mnt), (dst_vol, dst_mnt)):
         update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
                     delete_old=not vol_snaps)  # Delete only empty snapshots.
@@ -1331,10 +1348,9 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                     logger.exception('Failed.')
                 logger.info('Ok')
 
-        sleep(30)
         with hide('running', 'stdout'):
             try:
-                sudo('date')
+                wait_for_sudo('date')
             except BaseException as err:
                 logger.exception(str(err))
 
