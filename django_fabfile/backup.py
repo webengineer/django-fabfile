@@ -804,24 +804,21 @@ def get_avail_dev_encr(instance):
 
 
 def get_vol_dev(vol):
-    """Return volume representation as attached OS device."""
-    if not vol.attach_data.instance_id:
-        return
+    """Return OS-specific volume representation as attached device."""
+    assert vol.attach_data.instance_id
     inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
-    if not inst.public_dns_name:    # The instance is down.
-        return
+    assert inst.public_dns_name     # Instance is down.
     key_filename = config.get(vol.region.name, 'key_filename')
-    env.update({'host_string': inst.public_dns_name,
-                'key_filename': key_filename})
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
-    logger.debug(env, output)
-    for dev in [attached_dev, natty_dev]:
-        if wait_for_exists(dev):
-            return dev
+    with settings(host_string=inst.public_dns_name, key_filename=key_filename):
+        logger.debug(env, output)
+        for dev in [attached_dev, natty_dev]:
+            if wait_for_exists(dev):
+                return dev
 
 
-def mount_volume(vol, mkfs=False, mkrootfs=False):
+def mount_volume(vol, mkfs=False):
 
     """Mount the device by SSH. Return mountpoint on success.
 
@@ -837,24 +834,17 @@ def mount_volume(vol, mkfs=False, mkrootfs=False):
         mountpoint = dev.replace('/dev/', '/media/')
         wait_for_sudo('mkdir -p {0}'.format(mountpoint))
         if mkfs:
-            wait_for_sudo('mkfs.ext3 {dev}'.format(dev=dev))
-        """Add disk label for normal boot on created volume"""
-        logger.debug('mkrootfs value in mount_volume {0}'.format(mkrootfs))
-        
-        if mkrootfs:
-            wait_for_sudo('e2label {dev} uec-rootfs'.format(dev=dev))
-            
-        wait_for_sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
+            sudo('mkfs.ext3 {dev}'.format(dev=dev))
+        sudo('mount {dev} {mnt}'.format(dev=dev, mnt=mountpoint))
         if mkfs:
-            wait_for_sudo('chown -R {user}:{user} {mnt}'.format(
-                           user=env.user, mnt=mountpoint))
+            sudo('chown -R {user}:{user} {mnt}'.format(user=env.user,
+                                                       mnt=mountpoint))
     logger.debug('Mounted {0} to {1} at {2}'.format(vol, inst, mountpoint))
     return mountpoint
 
 
 @contextmanager
-def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
-                    mkrootfs=False):
+def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
 
     """Attach `snap` to `inst` or to new temporary instance.
 
@@ -892,8 +882,7 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
         wait_for(inst, 'running')
         try:
             vol, volumes = force_snap_attach(inst, snap)
-            logger.debug('mkrootfs value {0}'.format(mkrootfs))
-            mnt = mount_volume(vol, mkrootfs=mkrootfs)
+            mnt = mount_volume(vol)
             yield vol, mnt
         except BaseException as err:
             logger.exception(str(err))
@@ -973,7 +962,7 @@ def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
 
 
 @task
-def rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
+def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt):
     """Run `rsync` against mountpoints."""
     src_key_filename = config.get(src_inst.region.name, 'key_filename')
     dst_key_filename = config.get(dst_inst.region.name, 'key_filename')
@@ -999,8 +988,10 @@ def rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt):
             wait_for_sudo(cmd.format(
                 rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                 key_file=dst_key_filename, src_mnt=src_mnt))
+            label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
         with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
+            sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
             wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
                           '/root/.ssh/authorized_keys')
 
@@ -1015,7 +1006,7 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
 
     src_inst = get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
     dst_inst = get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
-    rsync_mountpoints(src_inst, src_mnt, dst_inst, dst_mnt)
+    rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt)
     if dst_vol.snapshot_id:
         old_snap = dst_vol.connection.get_all_snapshots(
             [dst_vol.snapshot_id])[0]
@@ -1030,14 +1021,14 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
         old_snap.delete()
 
 
-def create_empty_snapshot(region, size, mkrootfs=False):
+def create_empty_snapshot(region, size):
     """Format new filesystem."""
     with create_temp_inst(region) as inst:
         vol = region.connect().create_volume(size, inst.placement)
         earmarking_tag = config.get(region.name, 'tag_name')
         vol.add_tag(earmarking_tag, 'temporary')
         vol.attach(inst.id, get_avail_dev(inst))
-        mount_volume(vol, mkfs=True, mkrootfs=mkrootfs)
+        mount_volume(vol, mkfs=True)
         snap = vol.create_snapshot()
         snap.add_tag(earmarking_tag, 'temporary')
         vol.detach(True)
@@ -1076,15 +1067,6 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     dst_snaps = [snp for snp in dst_snaps if not snp.status == 'error']
     src_vol = get_snap_vol(src_snap)
     vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
-    _device = get_snap_device(src_snap)
-    logger.debug('device in rsync_snapshot {0}'.format(_device))
-    mkrootfs = False
-    try:
-        _dev = re.match(r'^/dev/sda[0-9]$', _device)
-    except:
-        _dev = None
-    if _dev:
-        mkrootfs = True
 
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
@@ -1094,13 +1076,11 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                         '{dst.description} in {dst_reg}'.format(**kwargs))
             return
     else:
-        dst_snap = create_empty_snapshot(dst_conn.region,
-                                         src_snap.volume_size, mkrootfs)
+        dst_snap = create_empty_snapshot(dst_conn.region, src_snap.volume_size)
 
-    with nested(attach_snapshot(src_snap, inst=src_inst, mkrootfs=mkrootfs),
-                attach_snapshot(dst_snap, inst=dst_inst,
-                mkrootfs=mkrootfs)) as (
-        (src_vol, src_mnt), (dst_vol, dst_mnt)):
+    with nested(attach_snapshot(src_snap, inst=src_inst),
+                attach_snapshot(dst_snap, inst=dst_inst)) as (
+                (src_vol, src_mnt), (dst_vol, dst_mnt)):
         update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
                     delete_old=not vol_snaps)  # Delete only empty snapshots.
 
