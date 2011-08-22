@@ -201,11 +201,11 @@ def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
             raise StateNotChangedError(obj_state)
 
 
-class _WaitForProper(object):
+class WaitForProper(object):
 
     """Decorate consecutive exceptions eating.
 
-    >>> @_WaitForProper(attempts=3, pause=5)
+    >>> @WaitForProper(attempts=3, pause=5)
     ... def test():
     ...     1 / 0
     ...
@@ -247,9 +247,9 @@ try:
 except NoOptionError as err:
     warn(str(err))
 else:
-    wait_for_sudo = _WaitForProper(attempts=ssh_timeout_attempts,
+    wait_for_sudo = WaitForProper(attempts=ssh_timeout_attempts,
                                     pause=ssh_timeout_interval)(sudo)
-    wait_for_exists = _WaitForProper(attempts=ssh_timeout_attempts,
+    wait_for_exists = WaitForProper(attempts=ssh_timeout_attempts,
                                       pause=ssh_timeout_interval)(exists)
 
 
@@ -1210,7 +1210,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
     kernel= config.get(conn.region.name, 'kernel' + arch)
-    dev = re.match(r'^/dev/sd[a-z]$', _device)
+    dev = re.match(r'^/dev/sd[a-z]$', get_descr_attr(snap, 'Root_dev_name'))
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
     ebs = EBSBlockDeviceType()
