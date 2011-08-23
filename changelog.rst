@@ -1,3 +1,9 @@
+Version 2011.08.23.1
+--------------------
+
+Added AMI assembling from two or more snapshots (see
+http://redmine.odeskps.com/issues/2843 for details).
+
 Version 2011.08.10.1
 --------------------
 

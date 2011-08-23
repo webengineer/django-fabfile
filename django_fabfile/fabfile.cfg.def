@@ -1,4 +1,5 @@
 [DEFAULT]
+aki_ptrn = ubuntu-kernels/ubuntu-lucid*
 ami_ptrn = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
 ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
@@ -15,6 +16,22 @@ tag_name = Earmarking
 tag_value = production
 ubuntu_aws_account = 099720109477
 username = ubuntu
+lucid_ext = 20110719
+natty_ext = 20110426
+
+[user_data] 
+user_data=#!/bin/bash -ex
+    sudo ln -fs /usr/share/zoneinfo/PST8PDT /etc/localtime
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install unattended-upgrades bsd-mailx mc htop zabbix-agent python-pip python-setuptools fail2ban
+    sudo echo -e 'APT::Periodic::Enable "1";\nAPT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::AutocleanInterval "0";\nAPT::Periodic::Download-Upgradeable-Packages "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' | sudo tee /etc/apt/apt.conf.d/10periodic
+    sudo sed -i 's/\/\/Unattended-Upgrade::Mail "root@localhost";/Unattended-Upgrade::Mail "monitoring@odeskps.com";/'  /etc/apt/apt.conf.d/50unattended-upgrades
+    sudo env DEBIAN_FRONTEND=noninteractive pip install --upgrade https://bitbucket.org/rvs/ztc/downloads/ztc-11.07.1.tar.gz
+    sudo mkdir /var/log/zabbix && sudo chmod 777 /var/log/zabbix
+    sudo sed -i "s/Server=localhost/Server=zabbix.odeskps.com,internal.infra.odeskps.com,184.73.177.59/" /etc/zabbix/zabbix_agentd.conf
+    sudo echo "Include=/etc/zabbix-agent.d/" >> /etc/zabbix/zabbix_agentd.conf
+    sudo /etc/init.d/fail2ban restart
+    sudo /etc/init.d/zabbix-agent restart
 
 [odesk]
 username = odesk-username
@@ -30,30 +47,40 @@ yearly_backups = 10
 [us-east-1]
 kernelx86_64 = aki-427d952b
 kerneli386 = aki-407d9529
+kernel_encr_i386 = aki-4c7d9525
+kernel_encr_x86_64 = aki-4e7d9527
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
 
 [us-west-1]
 kernelx86_64 = aki-9ba0f1de
 kerneli386 = aki-99a0f1dc
+kernel_encr_i386 = aki-9da0f1d8
+kernel_encr_x86_64 = aki-9fa0f1da
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
 
 [ap-southeast-1]
 kernelx86_64 = aki-11d5aa43
 kerneli386 = aki-13d5aa41
+kernel_encr_i386 = aki-6fd5aa3d
+kernel_encr_x86_64 = aki-6dd5aa3f
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
 
 [eu-west-1]
 kernelx86_64 = aki-4feec43b
 kerneli386 = aki-4deec439
+kernel_encr_i386 = aki-47eec433
+kernel_encr_x86_64 = aki-41eec435
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
 
 [ap-northeast-1]
 kernelx86_64 = aki-d409a2d5
 kerneli386 = aki-d209a2d3
+kernel_encr_i386 = aki-d609a2d7
+kernel_encr_x86_64 = aki-d809a2d9
 key_filename = /home/username/.ssh/regional_username_rsa
 key_pair = regional-username
 

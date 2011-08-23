@@ -8,7 +8,7 @@ setup(
     name='django-fabfile',
     url='http://redmine.odeskps.com/projects/django-fabfile',
     download_url='http://pypi.odeskps.com/django-fabfile',
-    version='2011.08.18.2',
+    version='2011.08.23.1',
     description='Deployment Django projects with Fabric.',
     install_requires=[
         'boto>=2.0b4',
