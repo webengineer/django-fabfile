@@ -1209,8 +1209,8 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
                       reverse=True) if snapshots else None
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
-    kernel= config.get(conn.region.name, 'kernel' + arch)
-    dev = re.match(r'^/dev/sda$', _device) #if our instance encrypted
+    kernel = config.get(conn.region.name, 'kernel' + arch)
+    dev = re.match(r'^/dev/sda$', _device)  # if our instance encrypted
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
     ebs = EBSBlockDeviceType()
@@ -1282,7 +1282,7 @@ def modify_kernel(region, instance_id):
     sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
          'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
          'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
-    kernel = config.get(region.name, 'kernel'+instance.architecture)
+    kernel = config.get(region.name, 'kernel' + instance.architecture)
     instance.stop()
     wait_for(instance, 'stopped')
     instance.modify_attribute('kernel', kernel)
@@ -1345,7 +1345,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                 logger.info('Downloading releases list.....')
                 sudo('curl -fs "{0}" > "{1}/release.html"'.format(page, data))
             except:
-                logger.exception('Invalid system: {0}{1}'.format(release, ext))
+                logger.exception('Invalid system: {0}'.format(release))
             logger.info('Uploading uecimage.gpg.....')
             put('./encrypted_root.tar.gz', data + '/encrypted_root.tar.gz',
                 use_sudo=True, mirror_local_mode=True)
@@ -1543,7 +1543,7 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         Hostname that will be used for access unlocking root volume;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
-    
+
     To unlock go to https://ip_address_of_instance (only after reboot).
     You can set up to 8 passwords. Defaut boot.key and boot.crt created for
     *.amazonaws.com so must work for all instances.
