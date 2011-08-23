@@ -1347,8 +1347,10 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
             except:
                 logger.exception('Invalid system: {0}{1}'.format(release, ext))
             logger.info('Uploading uecimage.gpg.....')
-            put('./encrypted_root.tar.gz', data + '/encrypted_root.tar.gz',
-                use_sudo=True, mirror_local_mode=True)
+            encr_root = os.path.join(os.path.dirname(__file__),
+                                     'encrypted_root.tar.gz')
+            put(encr_root, data + '/encrypted_root.tar.gz', use_sudo=True,
+                mirror_local_mode=True)
             sudo('cd {data}; tar -xf {data}/encrypted_root.tar.gz'
                  .format(data=data))
             file = sudo('pattern=\'<a href="([^"]*-{arch}\.tar\.gz)">'
