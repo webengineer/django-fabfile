@@ -1173,7 +1173,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
 
 @task
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
-               device=None, default_arch='x86_64', default_type='t1.micro'):
+               default_arch='x86_64', default_type='t1.micro'):
     """
     Creates AMI image from given snapshot.
 
@@ -1199,7 +1199,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     conn = get_region_by_name(region).connect()
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
     instance_id = get_snap_instance(snap)
-    _device = get_snap_device(snap) or device
+    _device = get_snap_device(snap)
     snaps = conn.get_all_snapshots(owner='self')
     snapshots = [snp for snp in snaps if
         get_snap_instance(snp) == instance_id and
@@ -1210,7 +1210,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
     kernel= config.get(conn.region.name, 'kernel' + arch)
-    dev = re.match(r'^/dev/sd[a-z]$', get_descr_attr(snap, 'Root_dev_name'))
+    dev = re.match(r'^/dev/sda$', _device) #if our instance encrypted
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
     ebs = EBSBlockDeviceType()
@@ -1220,7 +1220,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     block_map[_device] = ebs
     if snapshot:
         for s in snapshot:
-            s_dev = get_snap_device(s) or device
+            s_dev = get_snap_device(s)
             s_ebs = EBSBlockDeviceType()
             s_ebs.delete_on_termination = True
             s_ebs.snapshot_id = s.id
@@ -1566,12 +1566,20 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
                 arch = architecture
             make_encrypted_ubuntu(inst.public_dns_name, key_filename, 'ubuntu',
                                   hostname, arch, dev, name, release, pw1, pw2)
-            snap = vol.create_snapshot()
+            description = dumps({
+            'Volume': vol.id,
+            'Region': vol.region.name,
+            'Device': '/dev/sda',
+            'Type': type,
+            'Arch': architecture,
+            'Root_dev_name': '/dev/sda1',
+            'Time': _now(),
+            })
+            snap = vol.create_snapshot(description)
             wait_for(snap, '100%', limit=20 * 60)
             vol.detach(force=True)
             wait_for(vol, 'available')
             vol.delete()
-            img = create_ami(region_name, snap.id, 'RUN', device='/dev/sda',
-                             default_arch=architecture, default_type=type)
+            img = create_ami(region_name, snap.id, 'RUN')
             img.deregister()
             snap.delete()
