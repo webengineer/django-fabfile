@@ -1530,17 +1530,18 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     region_name
         Region where you want to create instance;
     release
-        Ubuntu release name (lucid or natty);
+        Ubuntu release name (lucid or natty). "lucid" by default;
     volume_size
         Size of volume in Gb (always remember, that script creates boot volume
         with size 1Gb, so minimal size of whole volume is 3Gb (1Gb for /boot
-        2Gb for /));
+        2Gb for /)). 8 by default;
     type
-        Type of instance;
+        Type of instance. 't1.micro' by default;
     name
         Name of luks encrypted volume;
     hostname
-        Hostname that will be used for access unlocking root volume;
+        Hostname that will be used for access unlocking root volume.
+        'boot.odeskps.com' by default;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
 
@@ -1549,6 +1550,7 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     *.amazonaws.com so must work for all instances.
     Process of creation is about 20 minutes long.
     """
+    assert volume_size >= 3, '1 GiB for /boot and 2 GiB for /'
     region = get_region_by_name(region_name)
     conn = region.connect()
 
