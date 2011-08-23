@@ -890,7 +890,10 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             key_filename = config.get(inst.region.name, 'key_filename')
             with settings(host_string=inst.public_dns_name,
                           key_filename=key_filename):
-                wait_for_sudo('umount {0}'.format(mnt))
+                try:
+                    wait_for_sudo('umount {0}'.format(mnt))
+                except:
+                    pass
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
