@@ -1209,8 +1209,8 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
                       reverse=True) if snapshots else None
     # setup for building an EBS boot snapshot
     arch = get_descr_attr(snap, 'Arch') or default_arch
-    kernel= config.get(conn.region.name, 'kernel' + arch)
-    dev = re.match(r'^/dev/sda$', _device) #if our instance encrypted
+    kernel = config.get(conn.region.name, 'kernel' + arch)
+    dev = re.match(r'^/dev/sda$', _device)  # if our instance encrypted
     if dev:
         kernel = config.get(conn.region.name, 'kernel_encr_' + arch)
     ebs = EBSBlockDeviceType()
@@ -1282,7 +1282,7 @@ def modify_kernel(region, instance_id):
     sudo('env DEBIAN_FRONTEND=noninteractive apt-get update && '
          'sudo env DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade && '
          'env DEBIAN_FRONTEND=noninteractive apt-get install grub-legacy-ec2')
-    kernel = config.get(region.name, 'kernel'+instance.architecture)
+    kernel = config.get(region.name, 'kernel' + instance.architecture)
     instance.stop()
     wait_for(instance, 'stopped')
     instance.modify_attribute('kernel', kernel)
@@ -1345,7 +1345,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                 logger.info('Downloading releases list.....')
                 sudo('curl -fs "{0}" > "{1}/release.html"'.format(page, data))
             except:
-                logger.exception('Invalid system: {0}{1}'.format(release, ext))
+                logger.exception('Invalid system: {0}'.format(release))
             logger.info('Uploading uecimage.gpg.....')
             encr_root = os.path.join(os.path.dirname(__file__),
                                      'encrypted_root.tar.gz')
