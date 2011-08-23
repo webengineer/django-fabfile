@@ -1518,7 +1518,6 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                  'EOT'.format(work=work))
             logger.info('Shutting down temporary instance')
             sudo('shutdown -h now')
-    return
 
 
 @task
