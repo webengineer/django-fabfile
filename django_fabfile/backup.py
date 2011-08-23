@@ -1293,10 +1293,9 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
                           architecture, dev, name, release, pw1, pw2):
     with settings(host_string=host_string, user=user,
                   key_filename=key_filename):
-        ext = config.get('DEFAULT', release + '_ext')
         data = '/home/' + user + '/data'
         page = 'https://uec-images.ubuntu.com/releases/' \
-               + release + '/release-' + ext + '/'
+               + release + '/release/'
         image = release + '-server-uec-' + architecture + '.img'
         pattern = '<a href=\\"([^\\"]*-' \
                   + architecture + '\.tar\.gz)\\">\\1</a>'
@@ -1509,7 +1508,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
             sudo('chroot "{work}/root" <<- EOT\n'
                  'apt-get -y install cryptsetup\n'
                  'apt-get -y clean\n'
-                 'update-initramfs -uk all\n'
+                 #'update-initramfs -uk all\n'
                  'mv /etc/resolv.conf.old /etc/resolv.conf\n'
                  'umount /dev/pts\n'
                  'umount /proc\n'
@@ -1522,9 +1521,9 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
 
 @task
 def create_encrypted_instance(region_name, release='lucid', volume_size='8',
-                             security_groups=None, architecture='x86_64',
-                             type='t1.micro', name='encr_root',
-                             hostname="boot.odeskps.com", pw1=None, pw2=None):
+                             architecture='x86_64', type='t1.micro',
+                             name='encr_root', hostname="boot.odeskps.com",
+                             pw1=None, pw2=None):
     """
     Creates ubuntu instance with luks-encryted root volume.
 
@@ -1538,11 +1537,13 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         2Gb for /));
     type
         Type of instance;
+    name
+        Name of luks encrypted volume;
     hostname
         Hostname that will be used for access unlocking root volume;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
-
+    
     To unlock go to https://ip_address_of_instance (only after reboot).
     You can set up to 8 passwords. Defaut boot.key and boot.crt created for
     *.amazonaws.com so must work for all instances.
