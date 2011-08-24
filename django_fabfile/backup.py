@@ -1172,7 +1172,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
     key_file = config.get(conn.region.name, 'key_filename')
     logger.info(info.format(inst=new_instance, user=env.user, key=key_file))
-
+    return new_instance
 
 @task
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
@@ -1251,8 +1251,10 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         instance_type = get_descr_attr(snap, 'Type') or default_type
-        launch_instance_from_ami(region, image.id, inst_type=instance_type)
-    return image
+        new_instance = None
+        new_instance = launch_instance_from_ami(region, image.id,
+                                                inst_type=instance_type)
+    return image, new_instance
 
 
 @task
@@ -1292,7 +1294,7 @@ def modify_kernel(region, instance_id):
     instance.start()
 
 
-def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
+def make_encrypted_ubuntu(host_string, key_filename, user,
                           architecture, dev, name, release, pw1, pw2):
     with settings(host_string=host_string, user=user,
                   key_filename=key_filename):
@@ -1300,8 +1302,6 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
         page = 'https://uec-images.ubuntu.com/releases/' \
                + release + '/release/'
         image = release + '-server-uec-' + architecture + '.img'
-        pattern = '<a href=\\"([^\\"]*-' \
-                  + architecture + '\.tar\.gz)\\">\\1</a>'
         bootlabel = "bootfs"
 
         def check(message, program, sums):
@@ -1359,7 +1359,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
             file = sudo('pattern=\'<a href="([^"]*-{arch}\.tar\.gz)">'
                         '\\1</a>\'; perl -ne "m[$pattern] && "\'print "$1\\n'
                         '"\' "{data}/release.html"'
-                        .format(data=data, pattern=pattern, arch=architecture))
+                        .format(data=data, arch=architecture))
             logger.info('Downloading ubuntu image.....')
             sudo('wget -P "{data}" "{page}{file}"'
                  .format(data=data, page=page, file=file))
@@ -1430,32 +1430,19 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
             sudo('cp {data}/encrypted_root/cryptsetup '
                  '{work}/root/etc/initramfs-tools/hooks/cryptsetup'
                  .format(data=data, work=work))
-            sudo('cp {data}/encrypted_root/boot.key {bozo_target}/boot.key'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/boot.crt {bozo_target}/boot.crt'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/cryptsetup.sh '
-                 '{bozo_target}/cryptsetup.sh'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/make_bozo_dir.sh '
-                 '{bozo_target}/make_bozo_dir.sh'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/index.html '
-                 '{bozo_target}/index.html'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/activate.cgi '
-                 '{bozo_target}/activate.cgi'
-                 .format(data=data, bozo_target=bozo_target))
-            sudo('cp {data}/encrypted_root/hiding.gif '
-                 '{bozo_target}/hiding.gif'
-                 .format(data=data, bozo_target=bozo_target))
+            places = {'data': data, 'bozo_target': bozo_target}
+            for file_ in ['boot.key', 'boot.crt', 'cryptsetup.sh',
+                          'index.html', 'activate.cgi', 'hiding.gif',
+                          'make_bozo_dir.sh']:
+                sudo('cp {data}/encrypted_root/{file} {bozo_target}/{file}'
+                     .format(file=file_, **places))
             logger.info('Modifying scripts to match our volumes.....')
             sudo('sed -i "s/\/dev\/sda2/{root_device}/" '
                  '{work}/root/etc/initramfs-tools/hooks/cryptsetup'.format(
                  root_device=root_device, work=work))
-            sudo('perl -i -p - "{0}/root/etc/initramfs-tools/boot/'
-                 'cryptsetup.sh" <<- EOT\ns[^(cs_host=).*][\\$1"{1}"];'
-                '\nEOT\n'.format(work, hostname))
+            #sudo('perl -i -p - "{0}/root/etc/initramfs-tools/boot/'
+                 #'cryptsetup.sh" <<- EOT\ns[^(cs_host=).*][\$1"{1}"];'
+                #'\nEOT\n'.format(work, hostname))
             sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
             if release == 'lucid':
                 logger.info('Adding apt entries for lucid.....')
@@ -1526,8 +1513,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user, hostname,
 @task
 def create_encrypted_instance(region_name, release='lucid', volume_size='8',
                              architecture='x86_64', type='t1.micro',
-                             name='encr_root', hostname="boot.odeskps.com",
-                             pw1=None, pw2=None):
+                             name='encr_root', pw1=None, pw2=None):
     """
     Creates ubuntu instance with luks-encryted root volume.
 
@@ -1543,13 +1529,11 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         Type of instance. 't1.micro' by default;
     name
         Name of luks encrypted volume;
-    hostname
-        Hostname that will be used for access unlocking root volume.
-        'boot.odeskps.com' by default;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
 
-    To unlock go to https://ip_address_of_instance (only after reboot).
+    To unlock go to https://ip_address_of_instance (only after reboot
+    or shutdown).
     You can set up to 8 passwords. Defaut boot.key and boot.crt created for
     *.amazonaws.com so must work for all instances.
     Process of creation is about 20 minutes long.
@@ -1572,7 +1556,7 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
             else:
                 arch = architecture
             make_encrypted_ubuntu(inst.public_dns_name, key_filename, 'ubuntu',
-                                  hostname, arch, dev, name, release, pw1, pw2)
+                                  arch, dev, name, release, pw1, pw2)
             description = dumps({
             'Volume': vol.id,
             'Region': vol.region.name,
@@ -1587,6 +1571,8 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
             vol.detach(force=True)
             wait_for(vol, 'available')
             vol.delete()
-            img = create_ami(region_name, snap.id, 'RUN')
+            img, new_instance = create_ami(region_name, snap.id, 'RUN')
+            logger.info('\nTo unlock go to:\n   https://{0}\n'
+                        .format(new_instance.public_dns_name))
             img.deregister()
             snap.delete()
