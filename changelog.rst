@@ -1,3 +1,11 @@
+Version 2011.08.25.1
+--------------------
+
+Added instance encryption support with `create_encrypted_instance` task.
+Encrypted instance could not be replicated to backup region yet - it could be
+restored from snapshots only within its region. Support for encrypted instance
+replication to backup region could be added in future.
+
 Version 2011.08.23.1
 --------------------
 
