@@ -1174,6 +1174,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     logger.info(info.format(inst=new_instance, user=env.user, key=key_file))
     return new_instance
 
+
 @task
 def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
                default_arch='x86_64', default_type='t1.micro'):
@@ -1251,7 +1252,6 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         instance_type = get_descr_attr(snap, 'Type') or default_type
-        new_instance = None
         new_instance = launch_instance_from_ami(region, image.id,
                                                 inst_type=instance_type)
     return image, new_instance
@@ -1440,9 +1440,6 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('sed -i "s/\/dev\/sda2/{root_device}/" '
                  '{work}/root/etc/initramfs-tools/hooks/cryptsetup'.format(
                  root_device=root_device, work=work))
-            #sudo('perl -i -p - "{0}/root/etc/initramfs-tools/boot/'
-                 #'cryptsetup.sh" <<- EOT\ns[^(cs_host=).*][\$1"{1}"];'
-                #'\nEOT\n'.format(work, hostname))
             sudo('mkdir -p "{work}/root/etc/ec2"'.format(work=work))
             if release == 'lucid':
                 logger.info('Adding apt entries for lucid.....')
