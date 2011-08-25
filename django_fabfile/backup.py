@@ -1514,6 +1514,10 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     """
     Creates ubuntu instance with luks-encryted root volume.
 
+    NOTE: Snapshot replication to backup region with `rsync_region` and
+    `rsync_snapshot` doesn't function for encrypted volumes. Due to this
+    reason encrypted instance could be restored only within its region.
+
     region_name
         Region where you want to create instance;
     release
@@ -1525,7 +1529,7 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     type
         Type of instance. 't1.micro' by default;
     name
-        Name of luks encrypted volume;
+        Name of luks encrypted volume. 'encr_root' by default;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
 
