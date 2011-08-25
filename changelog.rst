@@ -1,3 +1,9 @@
+Version 2011.08.25.2
+--------------------
+
+Updated config file parsing - only options to override should be mentioned in
+local `fabfile.cfg` for `django_fabfile.backup` module.
+
 Version 2011.08.25.1
 --------------------
 

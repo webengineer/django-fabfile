@@ -3,28 +3,8 @@
 Use configuration file ~/.boto for storing your credentials as described
 at http://code.google.com/p/boto/wiki/BotoConfig#Credentials
 
-All other options will be taken from ./fabfile.cfg file - copy-paste it
-from `django_fabfile/fabfile.cfg.def`.
-
-USAGE:
-------
-
-  1. For backup creation you must specify instance_id and region in
-  [main] section. To create snapshot of mounted volume, run:
-          fab -f backup.py backup_instance
-  2. To purge old snapshots you must specify # of snapshots to save in
-  [mount_backups], specify instance_id and region in [main] section.
-  Then run:
-          fab -f backup.py trim_snapshots
-  3. To mount backup specify needed values in [mount_backups] section of
-  fabfile.cfg, specify instance_id and region in [main] section. Then run:
-          fab -f backup.py mount_snapshot
-  4. To backup all instances in all regions, which tagged with some tag
-  ('Earmarking':'production' for example), add this tags to [main]
-  section of fabfile.cfg and run:
-          fab -f backup.py backup_instances_by_tag
-  5. To purge old snapshots in all regions, run:
-          fab -f backup.py trim_snapshots_for_regions
+All other options will be taken from ./fabfile.cfg file - copy-paste
+rows that should be overriden from `django_fabfile/fabfile.cfg.def`.
 '''
 import logging
 import logging.handlers
@@ -54,16 +34,12 @@ from fabric.contrib.files import append, exists
 from django_fabfile.utils import get_region_by_name
 
 
-config_file = 'fabfile.cfg'
+pkg = os.path.dirname(__file__)
 config = SafeConfigParser()
-config.read(config_file)
-try:
-    username = config.get('DEFAULT', 'username')
-    debug = config.getboolean('DEFAULT', 'debug')
-    logging_folder = config.get('DEFAULT', 'logging_folder')
-except NoOptionError:
-    username = 'ubuntu'
-    debug = logging_folder = False
+config.read((os.path.join(pkg, 'fabfile.cfg.def'), 'fabfile.cfg'))
+username = config.get('DEFAULT', 'username')
+debug = config.getboolean('DEFAULT', 'debug')
+logging_folder = config.get('DEFAULT', 'logging_folder')
 
 env.update({'user': username, 'disable_known_hosts': True})
 
@@ -241,16 +217,12 @@ class WaitForProper(object):
                     break
         return wrapper
 
-try:
-    ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
-    ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
-except NoOptionError as err:
-    warn(str(err))
-else:
-    wait_for_sudo = WaitForProper(attempts=ssh_timeout_attempts,
-                                    pause=ssh_timeout_interval)(sudo)
-    wait_for_exists = WaitForProper(attempts=ssh_timeout_attempts,
-                                      pause=ssh_timeout_interval)(exists)
+ssh_timeout_attempts = config.getint('DEFAULT', 'ssh_timeout_attempts')
+ssh_timeout_interval = config.getint('DEFAULT', 'ssh_timeout_interval')
+wait_for_sudo = WaitForProper(attempts=ssh_timeout_attempts,
+                              pause=ssh_timeout_interval)(sudo)
+wait_for_exists = WaitForProper(attempts=ssh_timeout_attempts,
+                                pause=ssh_timeout_interval)(exists)
 
 
 def add_tags(res, tags):
@@ -1100,8 +1072,9 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from
         config by default, may be configured per region;
-    native
-        sync only snapshots, created in the src_region_name."""
+    native_only
+        sync only snapshots, created in the src_region_name. True by
+        default."""
     src_region = get_region_by_name(src_region_name)
     dst_region = get_region_by_name(dst_region_name)
     conn = src_region.connect()
@@ -1350,8 +1323,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             except:
                 logger.exception('Invalid system: {0}'.format(release))
             logger.info('Uploading uecimage.gpg.....')
-            encr_root = os.path.join(os.path.dirname(__file__),
-                                     'encrypted_root.tar.gz')
+            encr_root = os.path.join(pkg, 'encrypted_root.tar.gz')
             put(encr_root, data + '/encrypted_root.tar.gz', use_sudo=True,
                 mirror_local_mode=True)
             sudo('cd {data}; tar -xf {data}/encrypted_root.tar.gz'

@@ -31,9 +31,6 @@ user_data=#!/bin/bash -ex
     sudo /etc/init.d/fail2ban restart
     sudo /etc/init.d/zabbix-agent restart
 
-[odesk]
-username = odesk-username
-
 [purge_backups]
 hourly_backups = 24
 daily_backups = 7
