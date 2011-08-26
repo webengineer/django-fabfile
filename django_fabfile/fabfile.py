@@ -16,7 +16,7 @@ Required settings should be placed in project settings::
     )
 
     # Project repositories.
-    PROD_REPO = 'git@github.com:ogt/mysite.git'
+    PROD_REPO = 'git@github.com:user/mysite.git'
     DEV_REPO = 'git@github.com:webengineer/mysite.git'
     PULL_REPO = DEV_REPO    # PROD_REPO for gatekeeper.
 
@@ -30,16 +30,16 @@ Required settings should be placed in project settings::
 
     # Staging and production servers.
     STAGING = {
-            'hostname': 'psdev.odesk.com',
+            'hostname': 'staging.dot.com',
             'ec2_instance': 'i-d86a73b0',
-            'ip': '204.236.235.116',
+            'ip': '204.236.215.216',
             'proj_dir': '/var/www/ott/mysite',
             'virtualenv_dir': 've',
     }
     PRODUCTION = {
-            'hostname': 'translation.odesk.com',
-            'ec2_instance': 'i-67ce0b0c',
-            'ip': '184.73.237.111',
+            'hostname': 'translation.dot.com',
+            'ec2_instance': 'i-67ae4b0c',
+            'ip': '184.73.37.110',
             'proj_dir': '/var/www/ott/mysite',
             'virtualenv_dir': 've',
     }
@@ -56,8 +56,8 @@ Optional settings::
     # Managing Websitepulse alerts.
     WB_PULSE_USERNAME = 'odeskps'
     WB_PULSE_API_KEY = 'OVERRIDE ME IN LOCAL SETTINGS'
-    WB_PULSE_LOGIN_TARGET = '73992'
-    WB_PULSE_HEALTHCHECK_TARGET = '74422'
+    WB_PULSE_LOGIN_TARGET = '73812'
+    WB_PULSE_HEALTHCHECK_TARGET = '79432'
 
     SUDO_EXPORT = 'HOME=/home/odeskps/ PYTHON_EGG_CACHE=/tmp'
 """

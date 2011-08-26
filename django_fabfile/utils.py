@@ -1,4 +1,5 @@
 from ConfigParser import SafeConfigParser
+from contextlib import contextmanager
 from datetime import datetime
 from json import loads
 import logging
@@ -315,3 +316,18 @@ def update_volumes_tags(filters=None):
                 vol_id = inst.block_device_mapping[bdm].volume_id
                 vol = inst.connection.get_all_volumes([vol_id])[0]
                 add_tags(vol, inst.tags)
+
+
+@contextmanager
+def config_temp_ssh(conn):
+    config_name = '{region}-temp-ssh-{now}'.format(
+        region=conn.region.name, now=datetime.utcnow().isoformat())
+    key_pair = conn.create_key_pair(config_name)
+    key_filename = key_pair.name + '.pem'
+    key_pair.save('./')
+    os.chmod(key_filename, 0600)
+    try:
+        yield os.path.realpath(key_filename)
+    finally:
+        key_pair.delete()
+        os.remove(key_filename)
