@@ -1,24 +1,31 @@
 [DEFAULT]
-aki_ptrn = ubuntu-kernels/ubuntu-lucid*
-ami_ptrn = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
-ami_ptrn_with_version = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
-ami_ptrn_with_release_date = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
-ami_regexp = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
-architecture = x86_64
-debug = False
+AKI_PTRN = ubuntu-kernels/ubuntu-lucid*
+AMI_PTRN = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
+AMI_PTRN_WITH_VERSION = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
+AMI_PTRN_WITH_RELEASE_DATE = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
+AMI_REGEXP = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
+ARCHITECTURE = x86_64
+DEBUG = False
 # Should be writable for rotating log files. Print logs to stdout if empty.
-logging_folder =
-minutes_for_snap = 60
-ssh_security_group = ssh-access
-ssh_timeout_attempts = 30
-ssh_timeout_interval = 30
-tag_name = Earmarking
-tag_value = production
-ubuntu_aws_account = 099720109477
-username = ubuntu
+LOGGING_FOLDER =
+MINUTES_FOR_SNAP = 60
+SSH_SECURITY_GROUP = ssh-access
+SSH_TIMEOUT_ATTEMPTS = 30
+SSH_TIMEOUT_INTERVAL = 30
+TAG_NAME = Earmarking
+TAG_VALUE = production
+UBUNTU_AWS_ACCOUNT = 099720109477
+USERNAME = ubuntu
+
+[Credentials]
+# Following options will be fetched from BotoConfig (see
+# http://code.google.com/p/boto/wiki/BotoConfig for more details) if
+# left commented out below.
+# AWS_ACCESS_KEY_ID = FILL_ME_OR_COMMENT_OUT
+# AWS_SECRET_ACCESS_KEY = FILL_ME_OR_COMMENT_OUT
 
 [user_data] 
-user_data=#!/bin/bash -ex
+USER_DATA=#!/bin/bash -ex
     sudo ln -fs /usr/share/zoneinfo/PST8PDT /etc/localtime
     sudo env DEBIAN_FRONTEND=noninteractive apt-get update
     sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install unattended-upgrades bsd-mailx mc htop zabbix-agent python-pip python-setuptools fail2ban
@@ -32,54 +39,54 @@ user_data=#!/bin/bash -ex
     sudo /etc/init.d/zabbix-agent restart
 
 [purge_backups]
-hourly_backups = 24
-daily_backups = 7
-weekly_backups = 4
-monthly_backups = 12
-quarterly_backups = 4
-yearly_backups = 10
+HOURLY_BACKUPS = 24
+DAILY_BACKUPS = 7
+WEEKLY_BACKUPS = 4
+MONTHLY_BACKUPS = 12
+QUARTERLY_BACKUPS = 4
+YEARLY_BACKUPS = 10
 
 [us-east-1]
-kernelx86_64 = aki-427d952b
-kerneli386 = aki-407d9529
-kernel_encr_i386 = aki-4c7d9525
-kernel_encr_x86_64 = aki-4e7d9527
-key_filename = /home/username/.ssh/regional_username_rsa
-key_pair = regional-username
+KERNELX86_64 = aki-427d952b
+KERNELI386 = aki-407d9529
+KERNEL_ENCR_I386 = aki-4c7d9525
+KERNEL_ENCR_X86_64 = aki-4e7d9527
+KEY_FILENAME = /home/username/.ssh/regional_username_rsa
+KEY_PAIR = regional-username
 
 [us-west-1]
-kernelx86_64 = aki-9ba0f1de
-kerneli386 = aki-99a0f1dc
-kernel_encr_i386 = aki-9da0f1d8
-kernel_encr_x86_64 = aki-9fa0f1da
-key_filename = /home/username/.ssh/regional_username_rsa
-key_pair = regional-username
+KERNELX86_64 = aki-9ba0f1de
+KERNELI386 = aki-99a0f1dc
+KERNEL_ENCR_I386 = aki-9da0f1d8
+KERNEL_ENCR_X86_64 = aki-9fa0f1da
+KEY_FILENAME = /home/username/.ssh/regional_username_rsa
+KEY_PAIR = regional-username
 
 [ap-southeast-1]
-kernelx86_64 = aki-11d5aa43
-kerneli386 = aki-13d5aa41
-kernel_encr_i386 = aki-6fd5aa3d
-kernel_encr_x86_64 = aki-6dd5aa3f
-key_filename = /home/username/.ssh/regional_username_rsa
-key_pair = regional-username
+KERNELX86_64 = aki-11d5aa43
+KERNELI386 = aki-13d5aa41
+KERNEL_ENCR_I386 = aki-6fd5aa3d
+KERNEL_ENCR_X86_64 = aki-6dd5aa3f
+KEY_FILENAME = /home/username/.ssh/regional_username_rsa
+KEY_PAIR = regional-username
 
 [eu-west-1]
-kernelx86_64 = aki-4feec43b
-kerneli386 = aki-4deec439
-kernel_encr_i386 = aki-47eec433
-kernel_encr_x86_64 = aki-41eec435
-key_filename = /home/username/.ssh/regional_username_rsa
-key_pair = regional-username
+KERNELX86_64 = aki-4feec43b
+KERNELI386 = aki-4deec439
+KERNEL_ENCR_I386 = aki-47eec433
+KERNEL_ENCR_X86_64 = aki-41eec435
+KEY_FILENAME = /home/username/.ssh/regional_username_rsa
+KEY_PAIR = regional-username
 
 [ap-northeast-1]
-kernelx86_64 = aki-d409a2d5
-kerneli386 = aki-d209a2d3
-kernel_encr_i386 = aki-d609a2d7
-kernel_encr_x86_64 = aki-d809a2d9
-key_filename = /home/username/.ssh/regional_username_rsa
-key_pair = regional-username
+KERNELX86_64 = aki-d409a2d5
+KERNELI386 = aki-d209a2d3
+KERNEL_ENCR_I386 = aki-d609a2d7
+KERNEL_ENCR_X86_64 = aki-d809a2d9
+KEY_FILENAME = /home/username/.ssh/regional_username_rsa
+KEY_PAIR = regional-username
 
 [RDBMS]
-master = 50.19.234.247
-backup = 46.137.188.195
-pcp_password = 
+MASTER = 50.19.234.247
+BACKUP = 46.137.188.195
+PCP_PASSWORD = 
