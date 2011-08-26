@@ -1,3 +1,6 @@
+"""Check README or `django_fabfile.utils.Config` docstring for setup
+instructions."""
+
 from contextlib import contextmanager
 from datetime import timedelta, datetime
 from json import dumps

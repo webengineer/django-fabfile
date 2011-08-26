@@ -1,11 +1,8 @@
-# -*- coding: utf-8 -*-
-'''
-Check `django_fabfile.utils.Config` docstring for setup instructions.
-'''
+"""Check README or `django_fabfile.utils.Config` docstring for setup
+instructions."""
+
 import logging
-import logging.handlers
 import os
-import os.path
 from datetime import timedelta, datetime
 from contextlib import nested
 from itertools import groupby

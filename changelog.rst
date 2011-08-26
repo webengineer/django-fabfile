@@ -1,3 +1,13 @@
+Version 2011.08.26.1
+--------------------
+
+Updated package and configuration layout.
+
+NOTE: sporadical errors "SSH session not active" (see
+https://github.com/fabric/fabric/issues/402 for more details) could be fixed by
+using patched version of Fabric
+https://github.com/webengineer/fabric/tree/fix-ssh-session-not-active.
+
 Version 2011.08.25.2
 --------------------
 

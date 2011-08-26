@@ -1,3 +1,6 @@
+"""Check README or `django_fabfile.utils.Config` docstring for setup
+instructions."""
+
 from ConfigParser import SafeConfigParser
 from contextlib import contextmanager
 from datetime import datetime

@@ -1,6 +1,6 @@
-========================================
-Batch commands to be started with Fabric
-========================================
+===============================================
+Fabric tasks for Django and Amazon Web Services
+===============================================
 
 Required settings
 -----------------
@@ -10,19 +10,17 @@ already in place if your are installed it using `pip install
 django-fabfile` from http://pypi.odeskps.com/. But if you are working
 within repository, then::
 
-    export PYTHONPATH=<path_to_folder_with_django_fabfile>
+    export PYTHONPATH=<path-to-folder-with-django_fabfile-package>
 
 in your shell.
 
-Pre-run configuration should be made for some modules - see details by
-running::
+Pre-run configuration
+---------------------
 
-    fab -f django_fabfile/<filename> -l
+Django settings will be checked out if environment variable
+`DJANGO_SETTINGS_MODULE` configured properly. If not configured within
+Django settings, then options will be taken from ./fabfile.cfg file -
+copy-paste rows that should be overriden from
+`django_fabfile/fabfile.cfg.def`."""
 
-where <filename> is the module of interest.
-
-Coding guidelines
------------------
-
-Imported functions should be prepended with underscore to hide them from
-``fabric --list``.
+See `changelog.rst` for recent updates.
