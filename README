@@ -140,4 +140,5 @@ snapshots updates. First replication tooks much more time obviously.
 Recent changes
 --------------
 
-See `changelog.rst` for recent updates.
+See `changelog.rst
+<https://github.com/webengineer/django-fabfile/blob/master/changelog.rst>`_ for recent updates.
