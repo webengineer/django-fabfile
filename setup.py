@@ -11,7 +11,7 @@ setup(
         'boto>=2.0b4',
         'odeskps-Fabric>=1.2b1',
     ],
-    long_description=open('README').read(),
+    long_description=open('README.rst').read(),
     author='Max Chervonec',
     author_email='electedm@odesk.com',
     packages=find_packages(),
