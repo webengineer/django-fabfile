@@ -1,22 +1,19 @@
-# -*- coding: utf-8 -*-
 from setuptools import setup, find_packages
-
-from django_fabfile import __doc__
 
 
 setup(
     name='django-fabfile',
-    url='http://redmine.odeskps.com/projects/django-fabfile',
-    download_url='http://pypi.odeskps.com/django-fabfile',
+    url='https://github.com/webengineer/django-fabfile',
+    download_url='http://pypi.python.org/pypi/django-fabfile/',
     version='2011.08.26.1',
-    description='Deployment Django projects with Fabric.',
+    description='Fabric tasks for Django and Amazon Web Services',
     install_requires=[
         'boto>=2.0b4',
         'odeskps-Fabric>=1.2b1',
     ],
-    long_description=__doc__,
-    maintainer='Max Chervonec',
-    maintainer_email='electedm@odesk.com',
+    long_description=open('README').read(),
+    author='Max Chervonec',
+    author_email='electedm@odesk.com',
     packages=find_packages(),
     include_package_data=False,
     package_data = {
@@ -29,9 +26,13 @@ setup(
         'Environment :: Web Environment',
         'Framework :: Django',
         'Intended Audience :: Developers',
+        'Intended Audience :: System Administrators',
         'License :: OSI Approved :: BSD License',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
         'Topic :: Software Development :: Libraries :: Python Modules',
+        'Topic :: System :: Clustering',
+        'Topic :: System :: Software Distribution',
+        'Topic :: System :: Systems Administration',
     ],
 )
