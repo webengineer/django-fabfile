@@ -5,7 +5,7 @@ setup(
     name='django-fabfile',
     url='https://github.com/webengineer/django-fabfile',
     download_url='http://pypi.python.org/pypi/django-fabfile/',
-    version='2011.08.26.1',
+    version='2011.08.28.2',
     description='Fabric tasks for Django and Amazon Web Services',
     install_requires=[
         'boto>=2.0b4',
@@ -17,7 +17,7 @@ setup(
     packages=find_packages(),
     include_package_data=False,
     package_data = {
-        '': ['*.rst', '*.def'],
+        'django-fabfile': ['*.def', '*.rst'],
     },
     zip_safe=True,
     # Get more strings from http://www.python.org/pypi?:action=list_classifiers
