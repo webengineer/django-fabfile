@@ -145,7 +145,7 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
                             synchronously=synchronously)
 
 
-def _trim_snapshots(conn, dry_run=False):
+def _trim_snapshots(region, dry_run=False):
 
     """Delete snapshots back in time in logarithmic manner.
 
@@ -214,6 +214,7 @@ def _trim_snapshots(conn, dry_run=False):
 
     # get all the snapshots, sort them by date and time,
     #and organize them into one array for each volume:
+    conn = region.connect()
     all_snapshots = conn.get_all_snapshots(owner='self')
     # oldest first
     all_snapshots.sort(cmp=lambda x, y: cmp(x.start_time, y.start_time))

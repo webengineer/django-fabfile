@@ -272,8 +272,7 @@ def get_snap_time(snap):
 
 
 def get_inst_by_id(region, instance_id):
-    conn = get_region_conn(region.name)
-    res = conn.get_all_instances([instance_id, ])
+    res = region.connect().get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
                                                       instance_id))
