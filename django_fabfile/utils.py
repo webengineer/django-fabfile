@@ -18,6 +18,9 @@ from boto import BotoConfigLocations, connect_ec2
 from boto.ec2 import connect_to_region, regions
 from fabric.api import prompt, sudo, task
 from fabric.contrib.files import exists
+from pkg_resources import resource_stream
+
+from django_fabfile import __name__ as pkg_name
 
 
 logger = logging.getLogger(__name__)
@@ -41,11 +44,10 @@ class Config(object):
         return cls._instance
 
     def __init__(self):
-        pkg = os.path.dirname(__file__)
         self.fabfile = SafeConfigParser()
-        self.fabfile.read(BotoConfigLocations +
-                          [os.path.join(pkg, 'fabfile.cfg.def'),
-                           'fabfile.cfg'])
+        self.fabfile.read(BotoConfigLocations)
+        self.fabfile.readfp(resource_stream(pkg_name, 'fabfile.cfg.def'))
+        self.fabfile.read('fabfile.cfg')
 
     def get_from_django(self, option, section='DEFAULT'):
         if os.environ.get('DJANGO_SETTINGS_MODULE'):

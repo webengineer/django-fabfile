@@ -16,7 +16,9 @@ from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
 from boto.exception import BotoServerError
 from fabric.api import env, output, prompt, put, settings, sudo, task
 from fabric.context_managers import hide
+from pkg_resources import resource_stream
 
+from django_fabfile import __name__ as pkg_name
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
     get_all_instances, get_all_snapshots, get_descr_attr,
@@ -25,6 +27,8 @@ from django_fabfile.utils import (
 
 
 config = Config()
+username = config.get('DEFAULT', 'USERNAME')
+env.update({'user': username, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
 
@@ -347,8 +351,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             except:
                 logger.exception('Invalid system: {0}'.format(release))
             logger.info('Uploading uecimage.gpg.....')
-            encr_root = os.path.join(os.path.dirname(__file__),
-                                     'encrypted_root.tar.gz')
+            encr_root = resource_stream(pkg_name, 'encrypted_root.tar.gz')
             put(encr_root, data + '/encrypted_root.tar.gz', use_sudo=True,
                 mirror_local_mode=True)
             sudo('cd {data}; tar -xf {data}/encrypted_root.tar.gz'
