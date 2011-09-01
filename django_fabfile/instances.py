@@ -186,7 +186,8 @@ def mount_volume(vol, mkfs=False):
 
 
 @contextmanager
-def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
+def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
+                    encr=None):
 
     """Attach `snap` to `inst` or to new temporary instance.
 
@@ -224,7 +225,10 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
         wait_for(inst, 'running')
         try:
             vol, volumes = force_snap_attach(inst, snap)
-            mnt = mount_volume(vol)
+            if encr:
+                mnt = None
+            else:
+                mnt = mount_volume(vol)
             yield vol, mnt
         except BaseException as err:
             logger.exception(str(err))
@@ -232,10 +236,11 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
             key_filename = config.get(inst.region.name, 'KEY_FILENAME')
             with settings(host_string=inst.public_dns_name,
                           key_filename=key_filename):
-                try:
-                    wait_for_sudo('umount {0}'.format(mnt))
-                except:
-                    pass
+                if not encr:
+                    try:
+                        wait_for_sudo('umount {0}'.format(mnt))
+                    except:
+                        pass
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
@@ -373,7 +378,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
                  .format(image=image, work=work))
             logger.info('Creating separate boot volume.....')
-            sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
+            sudo('echo -e "0 512 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
                  .format(dev=dev))
             logger.info('Formatting boot volume.....')
             sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
@@ -494,7 +499,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('chroot "{work}/root" <<- EOT\n'
                  'apt-get -y install cryptsetup\n'
                  'apt-get -y clean\n'
-                 #'update-initramfs -uk all\n'
+                 'update-initramfs -uk all\n'
                  'mv /etc/resolv.conf.old /etc/resolv.conf\n'
                  'umount /dev/pts\n'
                  'umount /proc\n'
@@ -722,6 +727,9 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         instance_type = get_descr_attr(snap, 'Type') or default_type
         new_instance = launch_instance_from_ami(region, image.id,
                                                 inst_type=instance_type)
+    if dev:
+        logger.info('\nTo unlock go to:\n   https://{0}\n'
+                        .format(new_instance.public_dns_name))
     return image, new_instance
 
 

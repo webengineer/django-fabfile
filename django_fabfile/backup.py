@@ -3,6 +3,7 @@ instructions."""
 
 import logging
 import os
+import re
 from datetime import timedelta, datetime
 from contextlib import nested
 from itertools import groupby
@@ -17,7 +18,7 @@ from django_fabfile.instances import (attach_snapshot, create_temp_inst,
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
     get_descr_attr, get_inst_by_id, get_region_conn,
-    get_snap_time, get_snap_vol,
+    get_snap_time, get_snap_vol, get_snap_device,
     wait_for, wait_for_sudo)
 
 
@@ -319,7 +320,8 @@ def trim_snapshots(region_name=None, dry_run=False):
 
 
 @task
-def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt):
+def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
+                      encr):
     """Run `rsync` against mountpoints."""
     src_key_filename = config.get(src_inst.region.name, 'KEY_FILENAME')
     dst_key_filename = config.get(dst_inst.region.name, 'KEY_FILENAME')
@@ -330,11 +332,22 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt):
                           '/root/.ssh/authorized_keys.bak')
             pub_key = local('ssh-keygen -y -f {0}'.format(key_file), True)
             append('/root/.ssh/authorized_keys', pub_key, use_sudo=True)
+            if encr:
+                sudo('screen -d -m sh -c "nc -l 60000 | gzip -dfc | '
+                     'sudo dd of={0} bs=16M"'
+                     .format(get_vol_dev(dst_vol)), pty=False)  # dirty magick
+                dst_ip = sudo(
+                    'curl http://169.254.169.254/latest/meta-data/public-ipv4')
+
         with settings(host_string=src_inst.public_dns_name,
                       key_filename=src_key_filename):
             put(key_file, '.ssh/', mirror_local_mode=True)
             dst_key_filename = os.path.split(key_file)[1]
-            cmd = (
+            if encr:
+                sudo('(dd if={0} bs=16M | gzip -cf --fast | nc -v {1} 60000)'
+                     .format(get_vol_dev(src_vol), dst_ip))
+            else:
+                cmd = (
                 'rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no"'
                 ' -aHAXz --delete --exclude /root/.bash_history '
                 '--exclude /home/*/.bash_history --exclude /etc/ssh/moduli '
@@ -342,18 +355,18 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt):
                 '--exclude /etc/udev/rules.d/*persistent-net.rules '
                 '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
                 '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
-            wait_for_sudo(cmd.format(
-                rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
-                key_file=dst_key_filename, src_mnt=src_mnt))
-            label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
-        with settings(host_string=dst_inst.public_dns_name,
+                wait_for_sudo(cmd.format(
+                    rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
+                    key_file=dst_key_filename, src_mnt=src_mnt))
+                label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
+                with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-            sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
-            wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
-                          '/root/.ssh/authorized_keys')
+                    sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
+                    wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
+                                  '/root/.ssh/authorized_keys')
 
 
-def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
+def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
 
     """Update destination region from `src_vol`.
 
@@ -363,7 +376,8 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, delete_old=False):
 
     src_inst = get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
     dst_inst = get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
-    rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt)
+    rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
+                     encr)
     if dst_vol.snapshot_id:
         old_snap = dst_vol.connection.get_all_snapshots(
             [dst_vol.snapshot_id])[0]
@@ -407,11 +421,19 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     snapshot_id
         snapshot to duplicate;
     src_inst, dst_inst
-        will be used instead of creating new for temporary."""
-
+        will be used instead of creating new for temporary.
+    You'll need to open port 60000 for encrypted instances replication
+    """
     src_conn = get_region_conn(src_region_name)
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
     dst_conn = get_region_conn(dst_region_name)
+    _src_device = get_snap_device(src_snap)
+    _src_dev = re.match(r'^/dev/sda$', _src_device)  # check for encryption
+    if _src_dev:
+        encr = True
+        logger.info('Found traces of encryption')
+    else:
+        encr = None
 
     info = 'Going to transmit {snap.volume_size} GiB {snap} {snap.description}'
     if src_snap.tags.get('Name'):
@@ -435,10 +457,10 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     else:
         dst_snap = create_empty_snapshot(dst_conn.region, src_snap.volume_size)
 
-    with nested(attach_snapshot(src_snap, inst=src_inst),
-                attach_snapshot(dst_snap, inst=dst_inst)) as (
+    with nested(attach_snapshot(src_snap, inst=src_inst, encr=encr),
+                attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
                 (src_vol, src_mnt), (dst_vol, dst_mnt)):
-        update_snap(src_vol, src_mnt, dst_vol, dst_mnt,
+        update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr,
                     delete_old=not vol_snaps)  # Delete only empty snapshots.
 
 
