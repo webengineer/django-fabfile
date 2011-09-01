@@ -10,7 +10,6 @@ django_fabfile/instances.py
 django_fabfile/switchdb.py
 django_fabfile/useradd.py
 django_fabfile/utils.py
-django_fabfile.egg-info/.SOURCES.txt.swp
 django_fabfile.egg-info/PKG-INFO
 django_fabfile.egg-info/SOURCES.txt
 django_fabfile.egg-info/dependency_links.txt

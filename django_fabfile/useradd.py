@@ -1,15 +1,14 @@
 from fabric.api import env, settings, sudo, abort, put, task
-from ConfigParser import ConfigParser as _ConfigParser
 from os.path import isfile as _isfile
 
-from django_fabfile.utils import get_region_by_name
+from django_fabfile.utils import Config, get_region_conn
+
+
+config = Config()
 
 
 try:
-    config_file = 'fabfile.cfg'
-    config = _ConfigParser()
-    config.read(config_file)
-    preconfigured_user = config.get('odesk', 'username')
+    preconfigured_user = config.get('DEFAULT', 'USERNAME')
 except:
     pass    # Expecting user to be provided as `-u` option.
 else:
@@ -21,7 +20,7 @@ env.update({'disable_known_hosts': True})
 
 
 def _get_inst_by_id(region, instance_id):
-    conn = get_region_by_name(region).connect()
+    conn = get_region_conn(region)
     res = conn.get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
@@ -82,7 +81,7 @@ def deluser(name, region=None, instance_ids=None):
                 _instance = _get_inst_by_id(region, inst)
                 if not env.key_filename:
                     key_filename = config.get(_instance.region.name,
-                                                      'key_filename')
+                                                      'KEY_FILENAME')
                     env.update({'key_filename': key_filename,
                                                   'warn_only': True})
                 env.update({'host_string': _instance.public_dns_name})
@@ -118,7 +117,7 @@ def adduser(username, region=None, instance_ids=None,
                 _instance = _get_inst_by_id(region, inst)
                 if not env.key_filename:
                     key_filename = config.get(_instance.region.name,
-                                                      'key_filename')
+                                                      'KEY_FILENAME')
                     env.update({'key_filename': key_filename})
                 env.update({'host_string': _instance.public_dns_name})
                 _create_account(username, region, instance_ids, passwordless,

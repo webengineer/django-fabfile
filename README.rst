@@ -1,18 +1,16 @@
-===============================================
 Fabric tasks for Django and Amazon Web Services
-===============================================
+***********************************************
 
-Required settings
------------------
+Required arrangements
+---------------------
 
-Note - `django_fabfile` package should be listed in your path. It's
-already in place if your are installed it using `pip install
-django-fabfile` from http://pypi.odeskps.com/. But if you are working
-within repository, then::
+.. note:: `django_fabfile` package should be listed in your path. It's already
+   in place if your are installed it using `pip install django-fabfile` from
+   http://pypi.odeskps.com/. But if you are working within repository, then::
 
     export PYTHONPATH=<path-to-folder-with-django_fabfile-package>
 
-in your shell.
+   in your shell.
 
 Pre-run configuration
 ---------------------
@@ -21,13 +19,13 @@ Django settings will be checked out if environment variable
 `DJANGO_SETTINGS_MODULE` configured properly. If not configured within
 Django settings, then options will be taken from ./fabfile.cfg file -
 copy-paste rows that should be overriden from
-`django_fabfile/fabfile.cfg.def`.
+:download:`django_fabfile/fabfile.cfg.def <../django_fabfile/fabfile.cfg.def>`.
 
-AWS IAM Policy
---------------
+Example of required AWS IAM Policy
+----------------------------------
 
-For using `django_fabfile.backup` and `django_fabfile.instances` Fabric
-tasks you need AWS account with following permissions:
+For using :mod:`django_fabfile.backup` and :mod:`django_fabfile.instances`
+Fabric tasks you need AWS account with following permissions:
 
 * create-snapshot::
 
@@ -116,9 +114,9 @@ tasks you need AWS account with following permissions:
 Backup script
 -------------
 
-NOTE: Instances and snaphots are filtered by tag "Earmarking" value
-"production". This can be configured in settings - see "Pre-run
-configuration" section above.
+.. note:: Instances and snaphots are filtered by tag "Earmarking" value
+   "production". This can be configured in settings - see "Pre-run
+   configuration" section above.
 
 Following backup commands may be configured with crontab to run daily::
 
@@ -140,5 +138,4 @@ snapshots updates. First replication tooks much more time obviously.
 Recent changes
 --------------
 
-See `changelog.rst
-<https://github.com/webengineer/django-fabfile/blob/master/changelog.rst>`_ for recent updates.
+See :doc:`changelog` for recent updates.

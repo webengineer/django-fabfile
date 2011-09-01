@@ -1,5 +1,5 @@
-"""Check README or `django_fabfile.utils.Config` docstring for setup
-instructions."""
+"""Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
+for setup instructions."""
 
 import logging
 import os
@@ -125,11 +125,12 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         per region;
     synchronously
         will be accomplished without checking results. False by default.
-        NOTE: when ``create_ami`` task compiles AMI from several
-        snapshots it restricts snapshot start_time difference with 10
-        minutes interval at most. Snapshot completion may take much more
-        time and due to this only asynchronously generated snapshots
-        will be assembled assurely."""
+
+    .. note:: when ``create_ami`` task compiles AMI from several
+              snapshots it restricts snapshot start_time difference with
+              10 minutes interval at most. Snapshot completion may take
+              much more time and due to this only asynchronously
+              generated snapshots will be assembled assurely."""
     if region_name:
         regions = [get_region_conn(region_name).region]
     else:
@@ -449,7 +450,7 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
     """Duplicates latest snapshots with given tag into dst_region.
 
     src_region_name, dst_region_name
-        every latest volume snapshot from src_region will be `rsync`ed
+        every latest volume snapshot from src_region will be rsynced
         to the dst_region;
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from

@@ -1,5 +1,5 @@
-"""Check README or `django_fabfile.utils.Config` docstring for setup
-instructions."""
+"""Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
+for setup instructions."""
 
 from contextlib import contextmanager
 from datetime import timedelta, datetime
@@ -260,9 +260,10 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None):
 @task
 def modify_kernel(region, instance_id):
     """
-    Modify old kernel for stopped instance
-    (needed for make pv-grub working)
-    NOTICE: install grub-legacy-ec2 and upgrades before run this.
+    Modify old kernel for stopped instance (needed for make pv-grub working)
+
+    .. note:: install grub-legacy-ec2 and upgrades before run this.
+
     region
         specify instance region;
     instance_id
@@ -275,8 +276,7 @@ def modify_kernel(region, instance_id):
         us-east-1       x86_64  aki-427d952b
         us-east-1       i386    aki-407d9529
         us-west-1       x86_64  aki-9ba0f1de
-        us-west-1       i386    aki-99a0f1dc
-    """
+        us-west-1       i386    aki-99a0f1dc"""
     key_filename = config.get(region, 'KEY_FILENAME')
     conn = get_region_conn(region)
     instance = get_inst_by_id(conn.region, instance_id)
@@ -573,11 +573,10 @@ def modify_instance_termination(region, instance_id):
 @task
 def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
 
-    """Mount snapshot to temporary created instance or `inst_id`.
+    """Mount snapshot to temporary created instance or inst_id.
 
-    region_name
-        snapshot location
-    snap_id
+    region_name, snap_id
+        specify snapshot. Will be prompted if `None`.
     inst_id
         attach to existing instance. Will be created temporary if
         None."""
@@ -654,6 +653,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
 
     Force option removes prompt request and creates new instance from
     created ami image.
+
     region, snap_id
         specify snapshot to be processed. Snapshot description in json
         format will be used to restore instance with same parameters.
@@ -667,8 +667,7 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
         architecture to use if not mentioned in snapshot description;
     default_type
         instance type to use if not mentioned in snapshot description.
-        Used only if ``force`` is "RUN".
-    """
+        Used only if ``force`` is "RUN"."""
     if not region or not snap_id:
         region, snap_id = select_snapshot()
     conn = get_region_conn(region)
@@ -735,9 +734,10 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     """
     Creates ubuntu instance with luks-encryted root volume.
 
-    NOTE: Snapshot replication to backup region with `rsync_region` and
-    `rsync_snapshot` doesn't function for encrypted volumes. Due to this
-    reason encrypted instance could be restored only within its region.
+    .. note:: Snapshot replication to backup region with `rsync_region`
+              and `rsync_snapshot` doesn't function for encrypted
+              volumes. Due to this reason encrypted instance could be
+              restored only within its region.
 
     region_name
         Region where you want to create instance;
@@ -756,10 +756,9 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
 
     To unlock go to https://ip_address_of_instance (only after reboot
     or shutdown).
-    You can set up to 8 passwords. Defaut boot.key and boot.crt created for
-    *.amazonaws.com so must work for all instances.
-    Process of creation is about 20 minutes long.
-    """
+    You can set up to 8 passwords. Defaut boot.key and boot.crt created
+    for .amazonaws.com so must work for all instances. Process of
+    creation is about 20 minutes long."""
     assert volume_size >= 3, '1 GiB for /boot and 2 GiB for /'
     conn = get_region_conn(region_name)
 
