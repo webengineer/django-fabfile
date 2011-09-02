@@ -102,7 +102,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 def create_temp_inst(region=None, zone=None, key_pair=None,
                       security_groups=None, synchronously=False):
     if region and zone:
-        assert zone in region.connect().get_all_zones(), (
+        assert zone in get_region_conn(region.name).get_all_zones(), (
             '{0} doesn\'t belong to {1}'.format(zone, region))
 
     def create_inst_in_zone(zone, key_pair, sec_grps):
@@ -114,7 +114,7 @@ def create_temp_inst(region=None, zone=None, key_pair=None,
     if zone:
         inst = create_inst_in_zone(zone, key_pair, security_groups)
     else:
-        for zone in region.connect().get_all_zones():
+        for zone in get_region_conn(region.name).get_all_zones():
             try:
                 inst = create_inst_in_zone(zone, key_pair, security_groups)
             except BotoServerError as err:

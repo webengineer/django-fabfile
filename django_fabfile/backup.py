@@ -216,7 +216,7 @@ def _trim_snapshots(region, dry_run=False):
 
     # get all the snapshots, sort them by date and time,
     #and organize them into one array for each volume:
-    conn = region.connect()
+    conn = get_region_conn(region.name)
     all_snapshots = conn.get_all_snapshots(owner='self')
     # oldest first
     all_snapshots.sort(cmp=lambda x, y: cmp(x.start_time, y.start_time))
@@ -295,7 +295,7 @@ def _trim_snapshots(region, dry_run=False):
 def delete_broken_snapshots():
     """Delete snapshots with status 'error'."""
     for region in get_region_conn().get_all_regions():
-        conn = region.connect()
+        conn = get_region_conn(region.name)
         filters = {'status': 'error'}
         snaps = conn.get_all_snapshots(owner='self', filters=filters)
         for snp in snaps:
@@ -411,7 +411,7 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
 def create_empty_snapshot(region, size):
     """Format new filesystem."""
     with create_temp_inst(region) as inst:
-        vol = region.connect().create_volume(size, inst.placement)
+        vol = get_region_conn(region.name).create_volume(size, inst.placement)
         earmarking_tag = config.get(region.name, 'TAG_NAME')
         vol.add_tag(earmarking_tag, 'temporary')
         vol.attach(inst.id, get_avail_dev(inst))
