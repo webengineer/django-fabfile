@@ -1,4 +1,4 @@
-__version__ = '2011.09.01.1'
+__version__ = '2011.09.02.1'
 
 __copyright__ = """
 Copyright (c) 2010-2011, oDesk http://www.odesk.com

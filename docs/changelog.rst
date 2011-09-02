@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2011.09.02.1
+--------------------
+
+Added support for transferring encrypted snapshots between regions.
+
 Version 2011.08.26.1
 --------------------
 
