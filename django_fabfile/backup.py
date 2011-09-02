@@ -321,8 +321,18 @@ def trim_snapshots(region_name=None, dry_run=False):
 
 @task
 def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
-                      encr):
-    """Run `rsync` against mountpoints."""
+                      encr=False):
+    """Run `rsync` against mountpoints.
+
+    :param src_inst: source instance;
+    :param src_vol: source volume with label that will be copied to
+    dst_vol;
+    :param src_mnt: root or directory hierarchy to replicate;
+    :param dst_inst: destination instance;
+    :param dst_vol: destination volume, that will be marked with label
+    from src_vol;
+    :param dst_mnt: destination point where source hierarchy to place;
+    :param encr: True if volume is encrypted."""
     src_key_filename = config.get(src_inst.region.name, 'KEY_FILENAME')
     dst_key_filename = config.get(dst_inst.region.name, 'KEY_FILENAME')
     with config_temp_ssh(dst_inst.connection) as key_file:
@@ -348,13 +358,15 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                      .format(get_vol_dev(src_vol), dst_ip))
             else:
                 cmd = (
-                'rsync -e "ssh -i .ssh/{key_file} -o StrictHostKeyChecking=no"'
-                ' -aHAXz --delete --exclude /root/.bash_history '
-                '--exclude /home/*/.bash_history --exclude /etc/ssh/moduli '
-                '--exclude /etc/ssh/ssh_host_* '
-                '--exclude /etc/udev/rules.d/*persistent-net.rules '
-                '--exclude /var/lib/ec2/* --exclude=/mnt/* --exclude=/proc/* '
-                '--exclude=/tmp/* {src_mnt}/ root@{rhost}:{dst_mnt}')
+                    'rsync -e "ssh -i .ssh/{key_file} -o '
+                    'StrictHostKeyChecking=no" -aHAXz --delete '
+                    '--exclude /root/.bash_history '
+                    '--exclude /home/*/.bash_history '
+                    '--exclude /etc/ssh/moduli --exclude /etc/ssh/ssh_host_* '
+                    '--exclude /etc/udev/rules.d/*persistent-net.rules '
+                    '--exclude /var/lib/ec2/* --exclude=/mnt/* '
+                    '--exclude=/proc/* --exclude=/tmp/* '
+                    '{src_mnt}/ root@{rhost}:{dst_mnt}')
                 wait_for_sudo(cmd.format(
                     rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                     key_file=dst_key_filename, src_mnt=src_mnt))
