@@ -742,11 +742,6 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     """
     Creates ubuntu instance with luks-encryted root volume.
 
-    .. note:: Snapshot replication to backup region with `rsync_region`
-              and `rsync_snapshot` doesn't function for encrypted
-              volumes. Due to this reason encrypted instance could be
-              restored only within its region.
-
     region_name
         Region where you want to create instance;
     release

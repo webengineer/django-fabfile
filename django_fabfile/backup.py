@@ -324,17 +324,18 @@ def trim_snapshots(region_name=None, dry_run=False):
 @task
 def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                       encr=False):
-    """Run `rsync` against mountpoints.
+    """Run `rsync` against mountpoints, copy disk label.
 
     :param src_inst: source instance;
     :param src_vol: source volume with label that will be copied to
-    dst_vol;
+                    dst_vol;
     :param src_mnt: root or directory hierarchy to replicate;
     :param dst_inst: destination instance;
     :param dst_vol: destination volume, that will be marked with label
-    from src_vol;
+                    from src_vol;
     :param dst_mnt: destination point where source hierarchy to place;
-    :param encr: True if volume is encrypted."""
+    :param encr: True if volume is encrypted;
+    :type encr: bool."""
     src_key_filename = config.get(src_inst.region.name, 'KEY_FILENAME')
     dst_key_filename = config.get(dst_inst.region.name, 'KEY_FILENAME')
     with config_temp_ssh(dst_inst.connection) as key_file:
@@ -373,11 +374,12 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                     rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                     key_file=dst_key_filename, src_mnt=src_mnt))
                 label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
-                with settings(host_string=dst_inst.public_dns_name,
+        with settings(host_string=dst_inst.public_dns_name,
                       key_filename=dst_key_filename):
-                    sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
-                    wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
-                                  '/root/.ssh/authorized_keys')
+            if not encr:
+                sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
+            wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
+                          '/root/.ssh/authorized_keys')
 
 
 def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
@@ -436,8 +438,8 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
         snapshot to duplicate;
     src_inst, dst_inst
         will be used instead of creating new for temporary.
-    You'll need to open port 60000 for encrypted instances replication
-    """
+
+    You'll need to open port 60000 for encrypted instances replication."""
     src_conn = get_region_conn(src_region_name)
     src_snap = src_conn.get_all_snapshots([snapshot_id])[0]
     dst_conn = get_region_conn(dst_region_name)
