@@ -1,5 +1,5 @@
+.gitignore
 README.rst
-changelog.rst
 setup.py
 django_fabfile/__init__.py
 django_fabfile/backup.py
@@ -16,3 +16,13 @@ django_fabfile.egg-info/dependency_links.txt
 django_fabfile.egg-info/not-zip-safe
 django_fabfile.egg-info/requires.txt
 django_fabfile.egg-info/top_level.txt
+docs/Makefile
+docs/README.rst
+docs/backup.rst
+docs/changelog.rst
+docs/conf.py
+docs/index.rst
+docs/instances.rst
+docs/switchdb.rst
+docs/useradd.rst
+docs/utils.rst
