@@ -1,3 +1,9 @@
+__version__ = '2011.09.01.1'
+
+__copyright__ = """
+Copyright (c) 2010-2011, oDesk http://www.odesk.com
+All rights reserved."""
+
 import logging
 import os
 import sys
@@ -5,11 +11,9 @@ import sys
 from fabric.api import output
 
 from django_fabfile.utils import Config
+
+
 config = Config()
-
-
-debug = config.getboolean('DEFAULT', 'DEBUG')
-logging_folder = config.get('DEFAULT', 'LOGGING_FOLDER')
 
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'
@@ -17,12 +21,14 @@ LOG_DATEFORMAT = '%Y-%m-%d %H:%M:%S %Z'
 
 logger = logging.getLogger()
 
+debug = config.getboolean('DEFAULT', 'DEBUG')
 if debug:
     logger.setLevel(logging.DEBUG)
     output['debug'] = True
 else:
     logger.setLevel(logging.INFO)
 
+logging_folder = config.get('DEFAULT', 'LOGGING_FOLDER')
 if logging_folder:
     LOG_FILENAME = os.path.join(logging_folder, __name__ + '.log')
     handler = logging.handlers.TimedRotatingFileHandler(

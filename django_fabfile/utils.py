@@ -1,5 +1,5 @@
-"""Check README or `django_fabfile.utils.Config` docstring for setup
-instructions."""
+"""Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
+for setup instructions."""
 
 from ConfigParser import SafeConfigParser
 from contextlib import contextmanager
@@ -18,6 +18,9 @@ from boto import BotoConfigLocations, connect_ec2
 from boto.ec2 import connect_to_region, regions
 from fabric.api import prompt, sudo, task
 from fabric.contrib.files import exists
+from pkg_resources import resource_stream
+
+from django_fabfile import __name__ as pkg_name
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +34,8 @@ class Config(object):
     `DJANGO_SETTINGS_MODULE` configured properly. If not configured
     within Django settings, then options will be taken from
     ./fabfile.cfg file - copy-paste rows that should be overriden from
-    `django_fabfile/fabfile.cfg.def`."""
+    :download:`django_fabfile/fabfile.cfg.def
+    <../django_fabfile/fabfile.cfg.def>`."""
 
     _instance = None
 
@@ -41,11 +45,10 @@ class Config(object):
         return cls._instance
 
     def __init__(self):
-        pkg = os.path.dirname(__file__)
         self.fabfile = SafeConfigParser()
-        self.fabfile.read(BotoConfigLocations +
-                          [os.path.join(pkg, 'fabfile.cfg.def'),
-                           'fabfile.cfg'])
+        self.fabfile.read(BotoConfigLocations)
+        self.fabfile.readfp(resource_stream(pkg_name, 'fabfile.cfg.def'))
+        self.fabfile.read('fabfile.cfg')
 
     def get_from_django(self, option, section='DEFAULT'):
         if os.environ.get('DJANGO_SETTINGS_MODULE'):
@@ -84,7 +87,10 @@ config = Config()
 def get_region_conn(region_name=None):
     """Connect to partially spelled `region_name`.
 
-    Return connection to default boto region without arguments."""
+    Return connection to default boto region if called without
+    arguments.
+
+    :param region_name: may be spelled partially."""
     creds = config.get_creds()
     if region_name:
         matched = [reg for reg in regions(**creds) if re.match(region_name,
@@ -101,12 +107,11 @@ def prompt_to_select(choices, query='Select from', paging=False,
                      multiple=False):
     """Prompt to select an option from provided choices.
 
-    choices
-        list or dict. If dict, then choice will be made among keys.
-    paging
-        render long list with pagination.
+    Return solely possible value instantly without prompting.
 
-    Return solely possible value instantly without prompting."""
+    :param choices: if dict, then choice will be made among keys.
+    :type choices: list or dict
+    :param paging: render long list with pagination."""
     keys = list(choices)
     while keys.count(None):
         keys.pop(choices.index(None))    # Remove empty values.
@@ -145,8 +150,8 @@ class StateNotChangedError(Exception):
 def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
     """Wait for attribute to go into state.
 
-    attrs
-        list of nested attribute names."""
+    :param attrs: nested attribute names.
+    :type attrs: list"""
 
     def get_state(obj, attrs=None):
         obj_state = obj.update()
@@ -272,8 +277,7 @@ def get_snap_time(snap):
 
 
 def get_inst_by_id(region, instance_id):
-    conn = get_region_conn(region.name)
-    res = conn.get_all_instances([instance_id, ])
+    res = region.connect().get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
                                                       instance_id))
@@ -309,8 +313,9 @@ def get_all_snapshots(region=None, id_only=False):
 def update_volumes_tags(filters=None):
     """Clone tags from instances to volumes.
 
-    filters
-        apply optional filtering for the `get_all_instances`."""
+    :param filters: apply optional filtering for the
+                    :func:`django_fabfile.utils.get_all_instances`.
+    """
     for region in regions():
         reservations = region.connect().get_all_instances(filters=filters)
         for res in reservations:
