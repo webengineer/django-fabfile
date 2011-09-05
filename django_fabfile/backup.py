@@ -313,7 +313,7 @@ def trim_snapshots(region_name=None, dry_run=False):
         boolean, only print info about old snapshots to be deleted."""
     delete_broken_snapshots()
     if region_name:
-        regions = [get_region_conn(region_name)]
+        regions = [get_region_conn(region_name).region]
     else:
         regions = get_region_conn().get_all_regions()
     for reg in regions:
