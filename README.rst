@@ -139,3 +139,11 @@ Recent changes
 --------------
 
 See :doc:`changelog` for recent updates.
+
+Licensing
+---------
+
+The product is licensed by oDesk http://www.odesk.com/ under
+:download:`GNU GENERAL PUBLIC LICENSE Version 3<license.txt>` except
+portions with attached inline license information like
+:func:`django_fabfile.backup._trim_snapshots`.

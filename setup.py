@@ -11,7 +11,8 @@ setup(
     description='Fabric tasks for Django and Amazon Web Services',
     install_requires=[
         'boto>=2.0b4',
-        'odeskps-Fabric>=1.2b1',
+        'dateutil>=1.5',
+        'Fabric>=1.2',
     ],
     long_description=open('README.rst').read(),
     author='oDesk',
@@ -19,9 +20,9 @@ setup(
     maintainer='Max Chervonec',
     maintainer_email='electedm@odesk.com',
     packages=find_packages(),
-    license='BSD',
+    license='GNU GPLv3',
     package_data = {
-        '': ['*.def', '*.rst', 'encrypted_root.tar.gz'],
+        '': ['*.def', '*.txt', '*.rst', 'encrypted_root.tar.gz'],
     },
     zip_safe=False,
     classifiers=[
@@ -30,7 +31,7 @@ setup(
         'Framework :: Django',
         'Intended Audience :: Developers',
         'Intended Audience :: System Administrators',
-        'License :: OSI Approved :: BSD License',
+        'License :: OSI Approved :: GNU General Public License (GPL)',
         'Operating System :: OS Independent',
         'Programming Language :: Python',
         'Topic :: Software Development :: Libraries :: Python Modules',

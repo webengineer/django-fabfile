@@ -1,9 +1,6 @@
-__version__ = '2011.09.02.1'
+__version__ = '2011.09.06.2'
 
-__copyright__ = """
-Copyright (c) 2010-2011, oDesk http://www.odesk.com
-All rights reserved."""
-
+from datetime import date
 import logging
 import os
 import sys
@@ -12,6 +9,9 @@ from fabric.api import output
 
 from django_fabfile.utils import Config
 
+
+__copyright__ = ('2010-{0}, oDesk http://www.odesk.com/. '
+                 'All rights reserved.').format(date.today().year)
 
 config = Config()
 

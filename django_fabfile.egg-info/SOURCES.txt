@@ -1,5 +1,6 @@
 .gitignore
 README.rst
+setup.cfg
 setup.py
 django_fabfile/__init__.py
 django_fabfile/backup.py
@@ -23,6 +24,7 @@ docs/changelog.rst
 docs/conf.py
 docs/index.rst
 docs/instances.rst
+docs/license.txt
 docs/switchdb.rst
 docs/useradd.rst
 docs/utils.rst

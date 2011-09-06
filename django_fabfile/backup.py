@@ -10,6 +10,7 @@ from itertools import groupby
 from json import dumps
 
 from boto.exception import EC2ResponseError
+from dateutil.relativedelta import relativedelta
 from fabric.api import env, local, put, settings, sudo, task
 from fabric.contrib.files import append
 
@@ -152,7 +153,11 @@ def _trim_snapshots(region, dry_run=False):
     """Delete snapshots back in time in logarithmic manner.
 
     dry_run
-        just print snapshot to be deleted."""
+        just print snapshot to be deleted.
+
+    Modified version of the `boto.ec2.connection.trim_snapshots
+    <http://pypi.python.org/pypi/boto/2.0>_`. Licensed under MIT license
+    by Mitch Garnaat, 2011."""
     hourly_backups = config.getint('purge_backups', 'HOURLY_BACKUPS')
     daily_backups = config.getint('purge_backups', 'DAILY_BACKUPS')
     weekly_backups = config.getint('purge_backups', 'WEEKLY_BACKUPS')
@@ -166,9 +171,9 @@ def _trim_snapshots(region, dry_run=False):
     last_midnight = datetime(now.year, now.month, now.day)
     last_sunday = datetime(now.year, now.month,
           now.day) - timedelta(days=(now.weekday() + 1) % 7)
-    last_month = datetime(now.year, now.month - 1, now.day)
-    last_year = datetime(now.year - 1, now.month, now.day)
-    other_years = datetime(now.year - 2, now.month, now.day)
+    last_month = datetime.now() - relativedelta(months=1)
+    last_year = datetime.now() - relativedelta(years=1)
+    other_years = datetime.now() - relativedelta(years=2)
     start_of_month = datetime(now.year, now.month, 1)
 
     target_backup_times = []
@@ -185,13 +190,13 @@ def _trim_snapshots(region, dry_run=False):
         target_backup_times.append(last_sunday - timedelta(weeks=week))
 
     for month in range(0, monthly_backups):
-        target_backup_times.append(last_month - timedelta(weeks=month * 4))
+        target_backup_times.append(last_month - relativedelta(months=month))
 
     for quart in range(0, quarterly_backups):
-        target_backup_times.append(last_year - timedelta(weeks=quart * 16))
+        target_backup_times.append(last_year - relativedelta(months=4 * quart))
 
     for year in range(0, yearly_backups):
-        target_backup_times.append(other_years - timedelta(days=year * 365))
+        target_backup_times.append(other_years - relativedelta(years=year))
 
     one_day = timedelta(days=1)
     while start_of_month > oldest_snapshot_date:

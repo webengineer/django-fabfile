@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2011.09.06.2
+--------------------
+
+Fixed snapshots trimming on 31st days of months.
+
 Version 2011.09.02.1
 --------------------
 
