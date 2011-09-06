@@ -12,10 +12,9 @@ from pydoc import pager
 import re
 from time import sleep
 from traceback import format_exc
-from warnings import warn
 
 from boto import BotoConfigLocations, connect_ec2
-from boto.ec2 import connect_to_region, regions
+from boto.ec2 import regions
 from fabric.api import prompt, sudo, task
 from fabric.contrib.files import exists
 from pkg_resources import resource_stream
@@ -286,27 +285,6 @@ def get_inst_by_id(region, instance_id):
         'Returned more than 1 {0} for instance_id {1}'.format(instances,
                                                               instance_id))
     return instances[0]
-
-
-def get_all_instances(region=None, id_only=False):
-    if not region:
-        warn('There is no guarantee of instance id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in regions())
-    connections = (connect_to_region(reg) for reg in reg_names)
-    for con in connections:
-        for res in con.get_all_instances():
-            for inst in res.instances:
-                yield inst.id if id_only else inst
-
-
-def get_all_snapshots(region=None, id_only=False):
-    if not region:
-        warn('There is no guarantee of snapshot id uniqueness across regions')
-    reg_names = [region] if region else (reg.name for reg in regions())
-    connections = (connect_to_region(reg) for reg in reg_names)
-    for con in connections:
-        for snap in con.get_all_snapshots(owner='self'):
-            yield snap.id if id_only else snap
 
 
 @task

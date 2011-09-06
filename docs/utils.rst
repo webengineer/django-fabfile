@@ -11,5 +11,3 @@ Internals
 
 .. automodule:: django_fabfile.utils
    :members:
-
-.. autofunction:: get_all_instances

@@ -11,7 +11,6 @@ from string import lowercase
 from time import sleep
 from traceback import format_exc
 
-from boto.ec2 import regions
 from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
 from boto.exception import BotoServerError
 from fabric.api import env, output, prompt, put, settings, sudo, task
@@ -21,9 +20,9 @@ from pkg_resources import resource_stream
 from django_fabfile import __name__ as pkg_name
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
-    get_all_instances, get_all_snapshots, get_descr_attr,
-    get_inst_by_id, get_region_conn, get_snap_device, get_snap_instance,
-    get_snap_time, prompt_to_select, wait_for, wait_for_exists, wait_for_sudo)
+    get_descr_attr, get_inst_by_id, get_region_conn, get_snap_device,
+    get_snap_instance, get_snap_time, prompt_to_select, wait_for,
+    wait_for_exists, wait_for_sudo)
 
 
 config = Config()
@@ -512,50 +511,6 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('shutdown -h now')
 
 
-def select_snapshot():
-    region_name = prompt_to_select([reg.name for reg in regions()],
-                                   'Select region from')
-    snap_id = prompt('Please enter snapshot ID if it\'s known (press Return '
-                     'otherwise)')
-    if snap_id:
-        if snap_id in get_all_snapshots(region_name, id_only=True):
-            return region_name, snap_id
-        else:
-            logger.info('No snapshot with provided ID found')
-
-    instances_list = list(get_all_instances(region_name))
-    instances = dict((inst.id, {
-        'Name': inst.tags.get('Name'),
-        'State': inst.state,
-        'Launched': inst.launch_time,
-        'Key pair': inst.key_name,
-        'Type': inst.instance_type,
-        'IP Address': inst.ip_address,
-        'DNS Name': inst.public_dns_name}) for inst in instances_list)
-    instance_id = prompt_to_select(instances, 'Select instance ID from',
-                                   paging=True)
-
-    all_instances = get_all_instances(region_name)
-    inst = [inst for inst in all_instances if inst.id == instance_id][0]
-    volumes = dict((dev.volume_id, {
-        'Status': dev.status,
-        'Attached': dev.attach_time,
-        'Size': dev.size,
-        'Snapshot ID': dev.snapshot_id}) for dev in
-                                            inst.block_device_mapping.values())
-    volume_id = prompt_to_select(volumes, 'Select volume ID from',
-                                 paging=True)
-
-    all_snaps = get_all_snapshots(region_name)
-    snaps_list = (snap for snap in all_snaps if snap.volume_id == volume_id)
-    snaps = dict((snap.id, {'Volume': snap.volume_id,
-                            'Date': snap.start_time,
-                            'Description': snap.description}) for snap in
-                                                                    snaps_list)
-    return region_name, prompt_to_select(snaps, 'Select snapshot ID from',
-                                         paging=True)
-
-
 @task
 def modify_instance_termination(region, instance_id):
     """Mark production instnaces as uneligible for termination.
@@ -576,18 +531,16 @@ def modify_instance_termination(region, instance_id):
 
 
 @task
-def mount_snapshot(region_name=None, snap_id=None, inst_id=None):
+def mount_snapshot(region_name, snap_id, inst_id=None):
 
     """Mount snapshot to temporary created instance or inst_id.
 
     region_name, snap_id
-        specify snapshot. Will be prompted if `None`.
+        specify snapshot.
     inst_id
         attach to existing instance. Will be created temporary if
         None."""
 
-    if not region_name or not snap_id:
-        region_name, snap_id = select_snapshot()
     conn = get_region_conn(region_name)
     inst = get_inst_by_id(conn.region, inst_id) if inst_id else None
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
@@ -651,7 +604,7 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
 
 
 @task
-def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
+def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
                default_arch='x86_64', default_type='t1.micro'):
     """
     Creates AMI image from given snapshot.
@@ -673,8 +626,6 @@ def create_ami(region=None, snap_id=None, force=None, root_dev='/dev/sda1',
     default_type
         instance type to use if not mentioned in snapshot description.
         Used only if ``force`` is "RUN"."""
-    if not region or not snap_id:
-        region, snap_id = select_snapshot()
     conn = get_region_conn(region)
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
     instance_id = get_snap_instance(snap)
