@@ -1,4 +1,4 @@
-__version__ = '2011.09.06.2'
+__version__ = '2011.09.06.3'
 
 from datetime import date
 import logging
