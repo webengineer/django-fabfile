@@ -47,6 +47,10 @@ if logging_folder:
 
         def flush(self):
             pass
+
+        def isatty(self):
+            return False
+
     # Redirect Fabric output to log file.
     sys.stdout = StreamLogger()
     sys.stderr = StreamLogger(level=logging.ERROR)
