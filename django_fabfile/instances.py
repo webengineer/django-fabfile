@@ -171,7 +171,7 @@ def mount_volume(vol, mkfs=False):
         volume to be mounted on the instance it is attached to."""
 
     vol.update()
-    assert vol.attach_data
+    assert vol.attach_data.device
     inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
