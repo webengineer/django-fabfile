@@ -67,9 +67,9 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
         if tags:
             add_tags(snapshot, tags)
         else:
+            add_tags(snapshot, vol.tags)
             if inst:
                 add_tags(snapshot, inst.tags)
-            add_tags(snapshot, vol.tags)
         logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
@@ -126,7 +126,8 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         will be fetched from config by default, may be configured
         per region;
     synchronously
-        will be accomplished without checking results. False by default.
+        will be accomplished with assuring successful result. False by
+        default.
 
     .. note:: when ``create_ami`` task compiles AMI from several
               snapshots it restricts snapshot start_time difference with
