@@ -2,7 +2,7 @@
 for setup instructions."""
 
 from contextlib import contextmanager
-from datetime import timedelta, datetime
+from datetime import timedelta
 from json import dumps
 import logging
 import os
