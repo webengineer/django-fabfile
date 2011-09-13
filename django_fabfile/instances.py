@@ -2,7 +2,7 @@
 for setup instructions."""
 
 from contextlib import contextmanager
-from datetime import timedelta, datetime
+from datetime import timedelta
 from json import dumps
 import logging
 import os
@@ -21,8 +21,8 @@ from django_fabfile import __name__ as pkg_name
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
     get_descr_attr, get_inst_by_id, get_region_conn, get_snap_device,
-    get_snap_instance, get_snap_time, prompt_to_select, wait_for,
-    wait_for_exists, wait_for_sudo)
+    get_snap_instance, get_snap_time, prompt_to_select, timestamp,
+    wait_for, wait_for_exists, wait_for_sudo)
 
 
 config = Config()
@@ -30,8 +30,6 @@ username = config.get('DEFAULT', 'USERNAME')
 env.update({'user': username, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
-
-_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 @task
@@ -107,7 +105,7 @@ def create_temp_inst(region=None, zone=None, key_pair=None,
     def create_inst_in_zone(zone, key_pair, sec_grps):
         inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                                security_groups=sec_grps)
-        inst.add_tag(config.get(zone.region.name, 'tag_name'), 'TEMPORARY')
+        inst.add_tag(config.get(zone.region.name, 'TAG_NAME'), 'temporary')
         return inst
 
     if zone:
@@ -209,7 +207,7 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
             add_tags(vol, snap.tags)
-            vol.add_tag(config.get(inst.region.name, 'tag_name'), 'TEMPORARY')
+            vol.add_tag(config.get(inst.region.name, 'TAG_NAME'), 'temporary')
             volumes_to_delete.append(vol)
             dev_name = get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
@@ -656,7 +654,8 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
             s_ebs.snapshot_id = s.id
             block_map[s_dev] = s_ebs
 
-    name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
+    name = 'Created {0} using access key {1}'.format(timestamp(),
+                                                     conn.access_key)
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
@@ -732,13 +731,13 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
             make_encrypted_ubuntu(inst.public_dns_name, key_filename, 'ubuntu',
                                   arch, dev, name, release, pw1, pw2)
             description = dumps({
-            'Volume': vol.id,
-            'Region': vol.region.name,
-            'Device': '/dev/sda',
-            'Type': type,
-            'Arch': architecture,
-            'Root_dev_name': '/dev/sda1',
-            'Time': _now(),
+                'Volume': vol.id,
+                'Region': vol.region.name,
+                'Device': '/dev/sda',
+                'Type': type,
+                'Arch': architecture,
+                'Root_dev_name': '/dev/sda1',
+                'Time': timestamp(),
             })
             snap = vol.create_snapshot(description)
             wait_for(snap, '100%', limit=20 * 60)

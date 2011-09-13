@@ -25,6 +25,10 @@ from django_fabfile import __name__ as pkg_name
 logger = logging.getLogger(__name__)
 
 
+def timestamp():
+    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
+
+
 class Config(object):
 
     """Make use from Django settings or local config file.
@@ -308,7 +312,7 @@ def update_volumes_tags(filters=None):
 @contextmanager
 def config_temp_ssh(conn):
     config_name = '{region}-temp-ssh-{now}'.format(
-        region=conn.region.name, now=datetime.utcnow().isoformat())
+        region=conn.region.name, now=timestamp())
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
     key_pair.save('./')

@@ -5,7 +5,7 @@ from django_fabfile import __version__
 
 setup(
     name='django-fabfile',
-    url='https://github.com/webengineer/django-fabfile',
+    url='http://packages.python.org/django-fabfile',
     download_url='http://pypi.python.org/pypi/django-fabfile/',
     version=__version__,
     description='Fabric tasks for Django and Amazon Web Services',
