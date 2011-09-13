@@ -17,7 +17,6 @@ Contents:
    switchdb
    useradd
    utils
-   changelog
 
 Indices and tables
 ==================
