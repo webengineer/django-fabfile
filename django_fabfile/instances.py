@@ -21,8 +21,8 @@ from django_fabfile import __name__ as pkg_name
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
     get_descr_attr, get_inst_by_id, get_region_conn, get_snap_device,
-    get_snap_instance, get_snap_time, prompt_to_select, timestamp,
-    wait_for, wait_for_exists, wait_for_sudo)
+    get_snap_instance, get_snap_time, new_security_group,
+    prompt_to_select, timestamp, wait_for, wait_for_exists, wait_for_sudo)
 
 
 config = Config()
@@ -35,7 +35,8 @@ logger = logging.getLogger(__name__)
 @task
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
                     security_groups=None):
-    """Create AWS EC2 instance.
+    """
+    Create AWS EC2 instance.
 
     Return created instance.
 
@@ -45,8 +46,10 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         string-formatted name. By default will be used latest zone;
     key_pair
         name of key_pair to be granted access. Will be fetched from
-        config by default, may be configured per region."""
-
+        config by default, may be configured per region.
+    security_groups
+        list of AWS Security Groups names separated with semicolon ';'.
+    """
     conn = get_region_conn(region_name)
 
     ami_ptrn = config.get('DEFAULT', 'AMI_PTRN')
@@ -83,10 +86,17 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         .format(image=image, zone=zone))
 
     key_pair = key_pair or config.get(conn.region.name, 'KEY_PAIR')
-    ssh_grp = config.get('DEFAULT', 'SSH_SECURITY_GROUP')
+
+    if security_groups and type(security_groups) is str:
+        security_groups = security_groups.split(';')
+    if not security_groups:
+        security_groups = [config.get('DEFAULT', 'SSH_SECURITY_GROUP')]
+    security_groups.append(new_security_group(conn.region))
+
     reservation = image.run(
         key_name=key_pair, instance_type='t1.micro', placement=zone,
-        security_groups=security_groups or [ssh_grp])
+        security_groups=security_groups)
+
     assert len(reservation.instances) == 1, 'More than 1 instances created'
     inst = reservation.instances[0]
     wait_for(inst, 'running')
@@ -686,9 +696,10 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
 
 
 @task
-def create_encrypted_instance(region_name, release='lucid', volume_size='8',
-                             architecture='x86_64', type='t1.micro',
-                             name='encr_root', pw1=None, pw2=None):
+def create_encrypted_instance(
+    region_name, release='lucid', volume_size='8', architecture='x86_64',
+    type='t1.micro', name='encr_root', pw1=None, pw2=None,
+    security_groups=None):
     """
     Creates ubuntu instance with luks-encryted root volume.
 
@@ -706,6 +717,8 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         Name of luks encrypted volume. 'encr_root' by default;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
+    security_groups
+        List of AWS Security Groups names separated with semicolon ';'.
 
     To unlock go to https://ip_address_of_instance (only after reboot
     or shutdown).
@@ -718,9 +731,8 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     with config_temp_ssh(conn) as key_filename:
         key_pair = os.path.splitext(os.path.split(key_filename)[1])[0]
         zn = conn.get_all_zones()[-1]
-        ssh_grp = config.get('DEFAULT', 'SSH_SECURITY_GROUP')
         with create_temp_inst(zone=zn, key_pair=key_pair,
-                              security_groups=[ssh_grp]) as inst:
+                              security_groups=security_groups) as inst:
             vol = conn.create_volume(size=volume_size, zone=zn)
             dev = get_avail_dev_encr(inst)
             vol.attach(inst.id, dev)

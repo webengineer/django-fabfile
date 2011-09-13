@@ -322,3 +322,9 @@ def config_temp_ssh(conn):
     finally:
         key_pair.delete()
         os.remove(key_filename)
+
+
+def new_security_group(region, name=None, description=None):
+    return get_region_conn(region.name).create_security_group(
+        name or 'Created on {0}'.format(timestamp()),
+        description or 'Created for using with specific instance')
