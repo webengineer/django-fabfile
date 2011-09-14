@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2011.09.14.4
+--------------------
+
+Accept `security_groups` argument only formatted as string separated
+with semicolons ';'.
+
 Version 2011.09.14.1
 --------------------
 

@@ -296,8 +296,11 @@ def new_security_group(region, name=None, description=None):
 
 
 @task
-def cleanup_security_groups(dry_run=False):
+def cleanup_security_groups(delete=False):
     """Delete unused AWS Security Groups.
+
+    :type delete: boolean
+    :param delete: notify only by default.
 
     If security group with the same name is used at least in one region,
     it is treated as used."""
@@ -311,9 +314,9 @@ def cleanup_security_groups(dry_run=False):
         if any(s_g.instances() for s_g in groups[grp].values()):
             del groups[grp]     # Security Group is used.
     for grp in sorted(groups):
-        if dry_run:
-            msg = '"SecurityGroup:{grp}" should be removed from {regs}'
-            logger.info(msg.format(grp=grp, regs=groups[grp].keys()))
-        else:
+        if delete:
             for reg in groups[grp]:
                 groups[grp][reg].delete()
+        else:
+            msg = '"SecurityGroup:{grp}" should be removed from {regs}'
+            logger.info(msg.format(grp=grp, regs=groups[grp].keys()))
