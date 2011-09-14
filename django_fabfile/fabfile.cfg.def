@@ -3,8 +3,8 @@ AKI_PTRN = ubuntu-kernels/ubuntu-lucid*
 AMI_PTRN = ebs/ubuntu-images/ubuntu-*-10.04-*-server-*
 AMI_PTRN_WITH_VERSION = ebs/ubuntu-images/ubuntu-*-{version}-*-server-*
 AMI_PTRN_WITH_RELEASE_DATE = ebs/ubuntu-images/ubuntu-*-{version}-*-server-{released_at}
-AMI_REGEXP = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-[a-z3264]+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
-ARCHITECTURE = x86_64
+AMI_REGEXP = ^ebs/ubuntu-images/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-(i386|amd64)+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
+ARCHITECTURE = i386
 DEBUG = False
 # Should be writable for rotating log files. Print logs to stdout if empty.
 LOGGING_FOLDER =

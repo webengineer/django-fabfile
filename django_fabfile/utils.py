@@ -1,21 +1,20 @@
 """Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
 for setup instructions."""
 
+from collections import defaultdict
 from ConfigParser import SafeConfigParser
 from contextlib import contextmanager
 from datetime import datetime
 from json import loads
 import logging
 import os
-from pprint import PrettyPrinter
-from pydoc import pager
 import re
 from time import sleep
 from traceback import format_exc
 
 from boto import BotoConfigLocations, connect_ec2
 from boto.ec2 import regions
-from fabric.api import prompt, sudo, task
+from fabric.api import sudo, task
 from fabric.contrib.files import exists
 from pkg_resources import resource_stream
 
@@ -106,41 +105,6 @@ def get_region_conn(region_name=None):
         return connect_ec2(**creds)
 
 
-def prompt_to_select(choices, query='Select from', paging=False,
-                     multiple=False):
-    """Prompt to select an option from provided choices.
-
-    Return solely possible value instantly without prompting.
-
-    :param choices: if dict, then choice will be made among keys.
-    :type choices: list or dict
-    :param paging: render long list with pagination."""
-    keys = list(choices)
-    while keys.count(None):
-        keys.pop(choices.index(None))    # Remove empty values.
-    assert len(keys), 'No choices provided'
-    if len(keys) == 1:
-        return keys[0]
-
-    def in_list(input_, avail_list, multiple=False):
-        selected_list = re.split('[\s,]+', input_)
-        if not multiple:
-            assert len(selected_list) == 1, 'Only one item allowed'
-        for item in selected_list:
-            if not item in avail_list:
-                raise ValueError('{0} not in {1}'.format(item, avail_list))
-        return selected_list if multiple else selected_list[0]
-
-    if paging:
-        pp = PrettyPrinter()
-        pager(query + '\n' + pp.pformat(choices))
-        text = 'Enter your choice or press Return to view options again'
-    else:
-        text = '{query} {choices}'.format(query=query, choices=choices)
-    input_in_list = lambda input_: in_list(input_, choices, multiple)
-    return prompt(text, validate=input_in_list)
-
-
 class StateNotChangedError(Exception):
 
     def __init__(self, state):
@@ -171,6 +135,7 @@ def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
             obj_state = get_state(obj, attrs)
         except Exception as err:
             logger.debug(str(err))
+            sleep(10)
         else:
             break
     logger.debug('Called {0} update'.format(obj))
@@ -328,3 +293,27 @@ def new_security_group(region, name=None, description=None):
     return get_region_conn(region.name).create_security_group(
         name or 'Created on {0}'.format(timestamp()),
         description or 'Created for using with specific instance')
+
+
+@task
+def cleanup_security_groups(dry_run=False):
+    """Delete unused AWS Security Groups.
+
+    If security group with the same name is used at least in one region,
+    it is treated as used."""
+    groups = defaultdict(lambda: {})
+    regions = get_region_conn().get_all_regions()
+    for reg in regions:
+        for s_g in get_region_conn(reg.name).get_all_security_groups():
+            if s_g.name != 'default':   # Can't be deleted.
+                groups[s_g.name][reg] = s_g
+    for grp in groups.keys():
+        if any(s_g.instances() for s_g in groups[grp].values()):
+            del groups[grp]     # Security Group is used.
+    for grp in sorted(groups):
+        if dry_run:
+            msg = '"SecurityGroup:{grp}" should be removed from {regs}'
+            logger.info(msg.format(grp=grp, regs=groups[grp].keys()))
+        else:
+            for reg in groups[grp]:
+                groups[grp][reg].delete()
