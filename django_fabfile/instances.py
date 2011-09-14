@@ -93,21 +93,9 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
-    # Configuring AMI launch.
-    key_pair = key_pair or config.get(conn.region.name, 'KEY_PAIR')
-    security_groups = conclude_security_groups(conn.region, security_groups)
-    # Create and launch new instance.
-    zone = zone_name or conn.get_all_zones()[-1].name
-    logger.info('Launching new instance in {zone} using {image}'
-        .format(image=image, zone=zone))
-    inst = image.run(
-        key_name=key_pair, instance_type='t1.micro', placement=zone,
-        security_groups=security_groups).instances[0]
-    wait_for(inst, 'running')
-    groups = [grp.name for grp in inst.groups]
-    inst.add_tag('Security Groups', dumps(groups, separators=(',', ':')))
-    logger.info('{inst} created in {zone}'.format(inst=inst, zone=zone))
-    return inst
+    return launch_instance_from_ami(
+        region_name, image.id, security_groups=security_groups,
+        key_pair=key_pair, zone_name=zone_name)
 
 
 @contextmanager
@@ -578,8 +566,9 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
 
 
 @task
-def launch_instance_from_ami(region_name, ami_id, inst_type=None,
-                             security_groups=None):
+def launch_instance_from_ami(
+    region_name, ami_id, inst_type=None, security_groups=None, key_pair=None,
+    zone_name=None):
     """Create instance from specified AMI.
 
     region_name
@@ -591,8 +580,12 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None,
         't1.micro' if not mentioned in the description;
     security_groups
         list of AWS Security Groups names. May be formatted as string
-        separated with semicolon ';'.
-        ."""
+        separated with semicolon ';'
+    key_pair
+        name of key_pair to be granted access. Will be fetched from
+        config by default, may be configured per region;
+    zone_name
+        in string format."""
     try:
         user_data = config.get('user_data', 'USER_DATA')
     except:
@@ -603,16 +596,20 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None,
 
     sec_grps = conclude_security_groups(conn.region, security_groups)
     wait_for(image, 'available')
+    logger.info('Launching new instance in {zone} using {image}'
+                .format(zone=zone_name, image=image))
     inst = image.run(
-        key_name=config.get(conn.region.name, 'KEY_PAIR'),
+        key_name=key_pair or config.get(conn.region.name, 'KEY_PAIR'),
         security_groups=sec_grps,
         instance_type=inst_type,
-        user_data=user_data).instances[0]
+        user_data=user_data,
+        placement=zone_name).instances[0]
     wait_for(inst, 'running')
     groups = [grp.name for grp in inst.groups]
     inst.add_tag('Security Groups', dumps(groups, separators=(',', ':')))
     add_tags(inst, image.tags)
     modify_instance_termination(conn.region.name, inst.id)
+    logger.info('{inst} created in {zone}'.format(inst=inst, zone=zone_name))
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
     key_file = config.get(conn.region.name, 'KEY_FILENAME')
