@@ -10,8 +10,8 @@ Version 2011.09.14.1
 * Added per-instance security groups. List of instance's security groups
   will be kept in tag "Security Groups" and copied into snapshot during
   backup.
-* Added `django_fabfile.utils.cleanup_security_groups` Fabric task for
-  deleting unused Security Groups.
+* Added :func:`django_fabfile.utils.cleanup_security_groups` Fabric task
+  for deleting unused Security Groups.
 
 Version 2011.09.06.2
 --------------------
