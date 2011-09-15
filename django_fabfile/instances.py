@@ -581,11 +581,7 @@ def launch_instance_from_ami(
     conn = get_region_conn(region_name)
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or get_descr_attr(image, 'Type') or 't1.micro'
-    # Conclude security groups.
-    if security_groups:
-        security_groups = security_groups.strip(';').split(';')
-    else:   # Allow SSH access.
-        security_groups = [config.get('DEFAULT', 'SSH_SECURITY_GROUP')]
+    security_groups = filter(None, security_groups.strip(';').split(';'))
     security_groups.append(new_security_group(conn.region))
     logger.info('Launching new instance in {reg} using {image}'
                 .format(reg=conn.region, image=image))

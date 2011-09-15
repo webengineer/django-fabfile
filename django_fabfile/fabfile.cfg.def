@@ -9,7 +9,6 @@ DEBUG = False
 # Should be writable for rotating log files. Print logs to stdout if empty.
 LOGGING_FOLDER =
 MINUTES_FOR_SNAP = 60
-SSH_SECURITY_GROUP = ssh-access
 HTTPS_SECURITY_GROUP = https-access
 SSH_TIMEOUT_ATTEMPTS = 30
 SSH_TIMEOUT_INTERVAL = 30

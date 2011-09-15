@@ -290,9 +290,12 @@ def config_temp_ssh(conn):
 
 
 def new_security_group(region, name=None, description=None):
-    return get_region_conn(region.name).create_security_group(
+    """Create Security Groups with SSH access."""
+    s_g = get_region_conn(region.name).create_security_group(
         name or 'Created on {0}'.format(timestamp()),
         description or 'Created for using with specific instance')
+    s_g.authorize('tcp', 22, 22, '0.0.0.0/0')
+    return s_g
 
 
 @task
