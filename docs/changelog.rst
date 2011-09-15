@@ -1,6 +1,24 @@
 Change Log
 **********
 
+Version 2011.09.15.1
+--------------------
+
+Accept `security_groups` argument only formatted as string separated
+with semicolons ';'.
+
+Version 2011.09.14.1
+--------------------
+
+* Updated default architecture (for newly created instances) from x86_64
+  to i386 for economy reasons - them could be upgraded to less expensive
+  types.
+* Added per-instance security groups. List of instance's security groups
+  will be kept in tag "Security Groups" and copied into snapshot during
+  backup.
+* Added :func:`django_fabfile.utils.cleanup_security_groups` Fabric task
+  for deleting unused Security Groups.
+
 Version 2011.09.06.2
 --------------------
 
