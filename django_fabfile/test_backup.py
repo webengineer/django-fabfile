@@ -229,11 +229,11 @@ def test_rsync_snapshot(fakeMethod1, fakeMethod2):
 
 
 # Run testing Tasks
-#print '\nRUN test for backup.backup_instance'
-#test_backup_instance()
+print '\nRUN test for backup.backup_instance'
+test_backup_instance()
 
-#print '\nRUN test for backup.trim_snapshots'
-#test_trim_snapshots()
+print '\nRUN test for backup.trim_snapshots'
+test_trim_snapshots()
 
 print '\nRUN test for backup.rsync_snapshot'
 test_rsync_snapshot()
