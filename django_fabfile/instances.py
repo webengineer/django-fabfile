@@ -89,7 +89,8 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
 
 
 @contextmanager
-def create_temp_inst(region=None, zone=None, key_pair=None, security_groups='',                      synchronously=False):
+def create_temp_inst(region=None, zone=None, key_pair=None, security_groups='',
+                     synchronously=False):
     if region and zone:
         assert zone in get_region_conn(region.name).get_all_zones(), (
             '{0} doesn\'t belong to {1}'.format(zone, region))
