@@ -369,7 +369,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
                  .format(image=image, work=work))
             logger.info('Creating separate boot volume.....')
-            sudo('echo -e "0 512 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
+            sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
                  .format(dev=dev))
             logger.info('Formatting boot volume.....')
             sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
