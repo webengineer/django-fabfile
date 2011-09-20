@@ -5,6 +5,7 @@ from collections import defaultdict
 from ConfigParser import SafeConfigParser
 from contextlib import contextmanager
 from datetime import datetime
+from itertools import chain
 from json import loads
 import logging
 import os
@@ -311,23 +312,19 @@ def cleanup_security_groups(delete=False):
     it is treated as used.
     """
     groups = defaultdict(lambda: {})
-    used_groups = []
+    used_groups = set(['default',])
     regions = get_region_conn().get_all_regions()
     for reg in regions:
         for s_g in get_region_conn(reg.name).get_all_security_groups():
-            if s_g.name == 'default':
-                continue    # Can't be deleted.
+            groups[s_g.name][reg] = s_g
             if s_g.instances():     # Security Group is used by instance.
-                used_groups.append(s_g.name)
+                used_groups.add(s_g.name)
             for rule in s_g.rules:
                 for grant in rule.grants:
                     if grant.name and grant.owner_id == s_g.owner_id:
-                        used_groups.append(s_g.name)    # SG is used by group.
-            if s_g.name not in used_groups:
-                groups[s_g.name][reg] = s_g
+                        used_groups.add(s_g.name)   # SG is used by group.
     for grp in used_groups:
-        if grp in groups:
-            del groups[grp]
+        del groups[grp]
 
     for grp in sorted(groups):
         if delete:
@@ -338,6 +335,15 @@ def cleanup_security_groups(delete=False):
         else:
             msg = '"SecurityGroup:{grp}" should be removed from {regs}'
             logger.info(msg.format(grp=grp, regs=groups[grp].keys()))
+
+
+def regroup_rules(security_group):
+    grouped_rules = defaultdict(lambda: [])
+    for rule in security_group.rules:
+        ports = rule.ip_protocol, rule.from_port, rule.to_port
+        for grant in rule.grants:
+            grouped_rules[ports].append(grant)
+    return grouped_rules
 
 
 def sync_rules(src_grp, dst_grp):
@@ -356,27 +362,19 @@ def sync_rules(src_grp, dst_grp):
         else:
             return True
 
-    # Grouping rules by ports.
-    src_rules = defaultdict(lambda: [])
-    for rule in src_grp.rules:
-        ports = rule.ip_protocol, rule.from_port, rule.to_port
-        for grant in rule.grants:
-            if grant.name and grant.owner_id == src_grp.owner_id:
-                # Assure granted group represented in destination region.
-                if not is_group_in(dst_grp.region, grant.name):
-                    src_conn = get_region_conn(src_grp.region.name)
-                    grant_grp = src_conn.get_all_security_groups(
-                        [grant.name])[0]
-                    dst_conn = get_region_conn(dst_grp.region.name)
-                    grant_copy = dst_conn.create_security_group(
-                        grant_grp.name, grant_grp.description)
-                    sync_rules(grant_grp, grant_copy)
-            src_rules[ports].append(grant)
-    dst_rules = defaultdict(lambda: [])
-    for rule in dst_grp.rules:
-        ports = rule.ip_protocol, rule.from_port, rule.to_port
-        for grant in rule.grants:
-            dst_rules[ports].append(grant)
+    src_rules = regroup_rules(src_grp)
+    # Assure granted group represented in destination region.
+    src_grants = chain(*src_rules.values())
+    for grant in dict((grant.name, grant) for grant in src_grants).values():
+        if grant.name and grant.owner_id == src_grp.owner_id:
+            if not is_group_in(dst_grp.region, grant.name):
+                src_conn = get_region_conn(src_grp.region.name)
+                grant_grp = src_conn.get_all_security_groups([grant.name])[0]
+                dst_conn = get_region_conn(dst_grp.region.name)
+                grant_copy = dst_conn.create_security_group(
+                    grant_grp.name, grant_grp.description)
+                sync_rules(grant_grp, grant_copy)
+    dst_rules = regroup_rules(dst_grp)
     # Remove rules absent in src_grp.
     for ports in set(dst_rules.keys()) - set(src_rules.keys()):
         for grant in dst_rules[ports]:
@@ -390,25 +388,35 @@ def sync_rules(src_grp, dst_grp):
             args = ports + ((None, grant) if grant.name else (grant, None))
             dst_grp.authorize(*args)
     # Refresh `dst_rules` from updated `dst_grp`.
-    dst_rules = defaultdict(lambda: [])
-    for rule in dst_grp.rules:
-        ports = rule.ip_protocol, rule.from_port, rule.to_port
-        for grant in rule.grants:
-            dst_rules[ports].append(grant)
+    dst_rules = regroup_rules(dst_grp)
+
+    @contextmanager
+    def patch_grouporcird():
+        """XXX Patching `boto.ec2.securitygroup.GroupOrCIDR` cmp and hash."""
+        from boto.ec2.securitygroup import GroupOrCIDR
+        original_cmp = getattr(GroupOrCIDR, '__cmp__', None)
+        GroupOrCIDR.__cmp__ = lambda self, other: cmp(str(self), str(other))
+        original_hash = GroupOrCIDR.__hash__
+        GroupOrCIDR.__hash__ = lambda self: hash(str(self))
+        try:
+            yield
+        finally:
+            if original_cmp:
+                GroupOrCIDR.__cmp__ = original_cmp
+            else:
+                del GroupOrCIDR.__cmp__
+            GroupOrCIDR.__hash__ = original_hash
+
     # Sync grants in common rules.
-    # XXX Patching `boto.ec2.securitygroup.GroupOrCIDR` with __cmp__.
-    from boto.ec2.securitygroup import GroupOrCIDR
-    GroupOrCIDR.__cmp__ = lambda self, other: cmp(str(self), str(other))
-    for ports in src_rules:
-        # Remove grants absent in src_grp rules.
-        for grant in set(dst_rules[ports]) - set(src_rules[ports]):
-            args = ports + ((None, grant) if grant.name else (grant, None))
-            dst_grp.revoke(*args)
-        # Add grants absent in dst_grp rules.
-        for grant in set(src_rules[ports]) - set(dst_rules[ports]):
-            if grant.name and not is_group_in(dst_grp.region, grant.name):
-                continue    # Absent other's granted group.
-            args = ports + ((None, grant) if grant.name else (grant, None))
-            dst_grp.authorize(*args)
-    # XXX Restoring absent state of patched __cmp__.
-    del GroupOrCIDR.__cmp__
+    with patch_grouporcird():
+        for ports in src_rules:
+            # Remove grants absent in src_grp rules.
+            for grant in set(dst_rules[ports]) - set(src_rules[ports]):
+                args = ports + ((None, grant) if grant.name else (grant, None))
+                dst_grp.revoke(*args)
+            # Add grants absent in dst_grp rules.
+            for grant in set(src_rules[ports]) - set(dst_rules[ports]):
+                if grant.name and not is_group_in(dst_grp.region, grant.name):
+                    continue    # Absent other's granted group.
+                args = ports + ((None, grant) if grant.name else (grant, None))
+                dst_grp.authorize(*args)
