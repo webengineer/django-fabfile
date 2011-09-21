@@ -1,7 +1,6 @@
 """Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
 for setup instructions."""
 
-from collections import defaultdict
 from ConfigParser import SafeConfigParser
 from contextlib import contextmanager
 from datetime import datetime
@@ -287,39 +286,3 @@ def config_temp_ssh(conn):
     finally:
         key_pair.delete()
         os.remove(key_filename)
-
-
-def new_security_group(region, name=None, description=None):
-    """Create Security Groups with SSH access."""
-    s_g = get_region_conn(region.name).create_security_group(
-        name or 'Created on {0}'.format(timestamp()),
-        description or 'Created for using with specific instance')
-    s_g.authorize('tcp', 22, 22, '0.0.0.0/0')
-    return s_g
-
-
-@task
-def cleanup_security_groups(delete=False):
-    """Delete unused AWS Security Groups.
-
-    :type delete: boolean
-    :param delete: notify only by default.
-
-    If security group with the same name is used at least in one region,
-    it is treated as used."""
-    groups = defaultdict(lambda: {})
-    regions = get_region_conn().get_all_regions()
-    for reg in regions:
-        for s_g in get_region_conn(reg.name).get_all_security_groups():
-            if s_g.name != 'default':   # Can't be deleted.
-                groups[s_g.name][reg] = s_g
-    for grp in groups.keys():
-        if any(s_g.instances() for s_g in groups[grp].values()):
-            del groups[grp]     # Security Group is used.
-    for grp in sorted(groups):
-        if delete:
-            for reg in groups[grp]:
-                groups[grp][reg].delete()
-        else:
-            msg = '"SecurityGroup:{grp}" should be removed from {regs}'
-            logger.info(msg.format(grp=grp, regs=groups[grp].keys()))
