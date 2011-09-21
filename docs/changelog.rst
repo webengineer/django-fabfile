@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2011.09.21.1
+--------------------
+
+Added security groups synchronization.
+
 Version 2011.09.15.1
 --------------------
 

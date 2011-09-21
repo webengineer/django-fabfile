@@ -27,7 +27,7 @@ def cleanup_security_groups(delete=False):
     Delete unused AWS Security Groups.
 
     :type delete: boolean
-    :param delete: notify only by default.
+    :param delete: notify only (i.e. False) by default.
 
     If security group with the same name is used at least in one region,
     it is treated as used.
@@ -141,3 +141,25 @@ def sync_rules(src_grp, dst_grp):
                     continue    # Absent other's granted group.
                 args = ports + ((None, grant) if grant.name else (grant, None))
                 dst_grp.authorize(*args)
+
+
+@task
+def sync_ryles_by_id(src_reg_name, src_grp_id, dst_reg_name, dst_grp_id):
+    """Update Security Group rules from other Security Group.
+
+    Works across regions as well. The sole exception is granted groups,
+    owned by another user - such groups can't be copied.
+
+    :param src_reg_name: region name
+    :type src_reg_name: str
+    :param src_grp_id: group ID
+    :type src_grp_id: str
+    :param dst_reg_name: region name
+    :type dst_reg_name: str
+    :param dst_grp_id: group ID
+    :type dst_grp_id: str"""
+    src_grp = get_region_conn(src_reg_name).get_all_security_groups(
+        filters={'group-id': src_grp_id})
+    dst_grp = get_region_conn(dst_reg_name).get_all_security_groups(
+        filters={'group-id': dst_grp_id})
+    sync_rules(src_grp, dst_grp)
