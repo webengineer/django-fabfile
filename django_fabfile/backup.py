@@ -111,6 +111,8 @@ def backup_instance(region_name, instance_id=None, instance=None,
     for dev in instance.block_device_mapping:
         vol_id = instance.block_device_mapping[dev].volume_id
         vol = conn.get_all_volumes([vol_id])[0]
+        # TODO Clean up
+        print 'vol =', vol
         snapshots.append(create_snapshot(vol, synchronously=synchronously))
     return snapshots
 
