@@ -1,6 +1,7 @@
 from setuptools import setup, find_packages
 
-from django_fabfile import __version__
+
+execfile('django_fabfile/version.py')  # Set __version__ into namespace.
 
 
 setup(
