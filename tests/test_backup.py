@@ -1,5 +1,6 @@
 import fudge
-from backup import backup_instance, trim_snapshots, rsync_snapshot
+import unittest
+from django_fabfile.backup import backup_instance, trim_snapshots, rsync_snapshot
 #import datetime
 #import utils
 #import boto
@@ -9,6 +10,19 @@ from backup import backup_instance, trim_snapshots, rsync_snapshot
 #from boto.ec2.instance import Instance
 #from boto.ec2.blockdevicemapping import BlockDeviceMapping
 from boto.sqs import regions
+import random, string
+
+
+# Specifying the test package
+test_pkg = 'django_fabfile.backup.'
+
+
+#------------------------------------------------------------------------------
+# Some useful functions
+#------------------------------------------------------------------------------
+# Generator of unique IDs for snapshots, volumes, etc.
+def key_gen(chars):
+    return ''.join(random.sample(string.ascii_letters + string.digits, chars))
 
 
 #------------------------------------------------------------------------------
@@ -26,9 +40,10 @@ class Connection():
         """
         Fake - replacement for Connection.get_all_volumes()
         """
-        _ret_val = vol_id
+        #_ret_val = vol_id
+        _ret_val = ['vol-'+key_gen(8), 'vol-'+key_gen(8)]
         print '>>> Connection.get_all_volumes({0})'.format(vol_id)
-        print '... return {0}'.format(vol_id)
+        print '... return {0}'.format(_ret_val)
         return _ret_val
 
 
@@ -43,9 +58,8 @@ class Connection():
         return _ret_val
 
 
-    def get_all_snapshots(self, snapshot_ids=None,
-                          owner=None, restorable_by=None,
-                          filters=None):
+    def get_all_snapshots(self, snapshot_ids=None, owner=None,
+        restorable_by=None, filters=None):
         """
         Fake - replacement for Connection.get_all_snapshots
         """
@@ -128,7 +142,7 @@ def create_snapshot(vol, synchronously):
     """
     Fake - replacement for backup.create_snapshot
     """
-    _ret_val = fudge.Fake('snap')
+    _ret_val = fudge.Fake('snap-'+key_gen(8))
     print '>>> create_snapshot({0}, {1})'.format(vol, synchronously)
     print '... return {0}'.format(_ret_val)
     return _ret_val
@@ -164,77 +178,94 @@ def get_snap_device(snap):
 #------------------------------------------------------------------------------
 # Testing tasks
 #------------------------------------------------------------------------------
-@fudge.patch('backup.get_region_conn', 'backup.get_inst_by_id',
-    'backup.create_snapshot')
-def test_backup_instance(fakeMethod1, fakeMethod2, fakeMethod3):
-    fakeMethod1.is_callable().calls(get_region_conn)
-    fakeMethod2.is_callable().calls(get_inst_by_id)
-    fakeMethod3.is_callable().calls(create_snapshot)
+class TestBackup(unittest.TestCase):
+    def setUp(self):
+        return
 
-    instance = Instance()
+    @fudge.patch(test_pkg+'get_region_conn', test_pkg+'get_inst_by_id',
+        test_pkg+'create_snapshot')
+    def test_backup_instance(self, fakeMethod1, fakeMethod2, fakeMethod3):
+        fakeMethod1.is_callable().calls(get_region_conn)
+        fakeMethod2.is_callable().calls(get_inst_by_id)
+        fakeMethod3.is_callable().calls(create_snapshot)
 
-    print "\nTEST 1 - backup.backup_instance(region_name)"
-    try: backup_instance('us-east-1')
-    except Exception, e: print 'STOP: ', e
+        instance = Instance()
 
-    print "\nTEST 2 - backup.backup_instance(region_name, instance_id)"
-    try: print backup_instance('us-east-1', 'i-12345678')
-    except Exception, e: print 'STOP: ', e
+        # Test case #1
+        print "\nTEST 1 - backup.backup_instance(region_name)"
+        try: backup_instance('us-east-1')
+        except Exception, e: print 'STOP: ', e
 
-    #TODO work out with such test issue
-    print "\nTEST 3 - backup.backup_instance(region_name, instance)"
-    try: print backup_instance('us-east-1', instance)
-    except Exception, e: print 'STOP: ', e
+        self.assertRaises(Exception, backup_instance, 'us-east-1')
 
-    print "\nTEST 4 - backup.backup_instance(region_name, instance_id, synchronously)"
-    try: print backup_instance('us-east-1', 'i-12345678', synchronously=True)
-    except Exception, e: print 'STOP: ', e
+        # Test case #2
+        print "\nTEST 2 - backup.backup_instance(region_name, instance_id)"
+        try: print backup_instance('us-east-1', 'i-12345678')
+        except Exception, e: print 'STOP: ', e
 
-    print "\nTEST 5 - backup.backup_instance(region_name, instance_id, instance)"
-    try: print backup_instance('us-east-1', 'i-12345678', instance)
-    except Exception, e: print 'STOP: ', e
+        # Test case #3
+        #TODO work out with such test issue
+        print "\nTEST 3 - backup.backup_instance(region_name, instance)"
+        try: print backup_instance('us-east-1', instance)
+        except Exception, e: print 'STOP: ', e
 
-    return
+        # Test case #4
+        print "\nTEST 4 - backup.backup_instance(region_name, instance_id, synchronously)"
+        try: print backup_instance('us-east-1', 'i-12345678', synchronously=True)
+        except Exception, e: print 'STOP: ', e
 
+        # Test case #5
+        print "\nTEST 5 - backup.backup_instance(region_name, instance_id, instance)"
+        try: print backup_instance('us-east-1', 'i-12345678', instance)
+        except Exception, e: print 'STOP: ', e
 
-@fudge.patch('backup.get_region_conn', 'backup.delete_broken_snapshots', 'backup._trim_snapshots')
-def test_trim_snapshots(fakeMethod1, fakeMethod2, fakeMethod3):
-    fakeMethod1.is_callable().calls(get_region_conn)
-    fakeMethod2.is_callable().calls(delete_broken_snapshots)
-    fakeMethod3.is_callable().calls(_trim_snapshots)
+        self.assertRaises(Exception, backup_instance, 'us-east-1', 'i-12345678', instance)
 
-    print "\nTEST 1 - backup.trim_snapshots(region_name)"
-    try: trim_snapshots('us-east-1')
-    except Exception, e: print 'STOP: ', e
-
-    print "\nTEST 2 - backup.trim_snapshots()"
-    try: trim_snapshots()
-    except Exception, e: print 'STOP: ', e
-
-    return
+        return
 
 
-@fudge.patch('backup.get_region_conn', 'backup.get_snap_device')
-def test_rsync_snapshot(fakeMethod1, fakeMethod2):
-    #rsync_snapshot(src_region_name, snapshot_id, dst_region_name, src_inst=None, dst_inst=None)
-    fakeMethod1.is_callable().calls(get_region_conn)
-    fakeMethod2.is_callable().calls(get_snap_device)
+    @fudge.patch(test_pkg+'get_region_conn', test_pkg+'delete_broken_snapshots',
+        test_pkg+'_trim_snapshots')
+    def test_trim_snapshots(self, fakeMethod1, fakeMethod2, fakeMethod3):
+        fakeMethod1.is_callable().calls(get_region_conn)
+        fakeMethod2.is_callable().calls(delete_broken_snapshots)
+        fakeMethod3.is_callable().calls(_trim_snapshots)
 
-    print "\nCALL for backup.rsync_snapshot(src_region_name, snapshot_id, dst_region_name)"
-#    try: rsync_snapshot('us-east-1', 'snap-12345678', 'us-west-1')
-#    except Exception, e: print 'STOP: ', e
-    rsync_snapshot('us-east-1', 'snap-12345678', 'us-west-1')
+        print "\nTEST 1 - backup.trim_snapshots(region_name)"
+        try: trim_snapshots('us-east-1')
+        except Exception, e: print 'STOP: ', e
 
-    return
+        print "\nTEST 2 - backup.trim_snapshots()"
+        try: trim_snapshots()
+        except Exception, e: print 'STOP: ', e
+
+        return
+
+
+    @fudge.patch(test_pkg+'get_region_conn', test_pkg+'get_snap_device')
+    def test_rsync_snapshot(self, fakeMethod1, fakeMethod2):
+        #rsync_snapshot(src_region_name, snapshot_id, dst_region_name, src_inst=None, dst_inst=None)
+        fakeMethod1.is_callable().calls(get_region_conn)
+        fakeMethod2.is_callable().calls(get_snap_device)
+
+        print "\nCALL for backup.rsync_snapshot(src_region_name, snapshot_id, dst_region_name)"
+        try: rsync_snapshot('us-east-1', 'snap-12345678', 'us-west-1')
+        except Exception, e: print 'STOP: ', e
+#        rsync_snapshot('us-east-1', 'snap-12345678', 'us-west-1')
+
+        return
 
 
 # Run testing Tasks
-print '\nRUN test for backup.backup_instance'
-test_backup_instance()
+#print '\nRUN test for backup.backup_instance'
+#test_backup_instance()
 
-print '\nRUN test for backup.trim_snapshots'
-test_trim_snapshots()
+#print '\nRUN test for backup.trim_snapshots'
+#test_trim_snapshots()
 
-print '\nRUN test for backup.rsync_snapshot'
-test_rsync_snapshot()
+#print '\nRUN test for backup.rsync_snapshot'
+#test_rsync_snapshot()
 
+
+if __name__ == '__main__':
+    unittest.main()
