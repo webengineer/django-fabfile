@@ -15,17 +15,34 @@ Required arrangements
 Pre-run configuration
 ---------------------
 
-Django settings will be checked out if environment variable
-`DJANGO_SETTINGS_MODULE` configured properly. If not configured within
-Django settings, then options will be taken from ./fabfile.cfg file -
-copy-paste rows that should be overriden from
+Django settings will be checked first if environment variable
+`DJANGO_SETTINGS_MODULE` configured properly. If option was not configured
+within Django settings, then its value will be taken from ``./fabfile.cfg``
+file - copy-paste there rows that should be overriden from defaults
 :download:`django_fabfile/fabfile.cfg.def <../django_fabfile/fabfile.cfg.def>`.
+
+Django settings should be configured in following form (with preserving
+sections case)::
+
+    FABFILE = {
+        'DEFAULT': {
+            LOGGING_FOLDER = '.',
+        },
+        'Credentials': {
+            'AWS_ACCESS_KEY_ID': 'AKIAABCDEFGHIJKLMNOP',
+            'AWS_SECRET_ACCESS_KEY': 'ABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLM',
+        },
+    }
+
+.. note::
+   Boto config files http://code.google.com/p/boto/wiki/BotoConfig will be
+   examined at least - if ``[Credentials]`` or some other options was filled
+   neither in Django settings nor in ``./fabfile.cfg`` or :download:`django_fabfile/fabfile.cfg.def <../django_fabfile/fabfile.cfg.def>`.
 
 Example of required AWS IAM Policy
 ----------------------------------
 
-For using :mod:`django_fabfile.backup` and :mod:`django_fabfile.instances`
-Fabric tasks you need AWS account with following permissions:
+For using Fabric tasks you need AWS account with following permissions:
 
 * create-snapshot::
 
