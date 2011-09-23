@@ -2,7 +2,7 @@
 for setup instructions."""
 
 from contextlib import contextmanager
-from datetime import timedelta, datetime
+from datetime import timedelta
 from json import dumps
 import logging
 import os
@@ -18,11 +18,11 @@ from fabric.context_managers import hide
 from pkg_resources import resource_stream
 
 from django_fabfile import __name__ as pkg_name
+from django_fabfile.security_groups import new_security_group
 from django_fabfile.utils import (
-    Config, StateNotChangedError, add_tags, config_temp_ssh,
-    get_descr_attr, get_inst_by_id, get_region_conn, get_snap_device,
-    get_snap_instance, get_snap_time, prompt_to_select, wait_for,
-    wait_for_exists, wait_for_sudo)
+    Config, StateNotChangedError, add_tags, config_temp_ssh, get_descr_attr,
+    get_inst_by_id, get_region_conn, get_snap_device, get_snap_instance,
+    get_snap_time, timestamp, wait_for, wait_for_exists, wait_for_sudo)
 
 
 config = Config()
@@ -31,13 +31,12 @@ env.update({'user': username, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
 
-_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
-
 
 @task
 def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
-                    security_groups=None):
-    """Create AWS EC2 instance.
+                    security_groups='', architecture=None):
+    """
+    Create AWS EC2 instance.
 
     Return created instance.
 
@@ -47,19 +46,23 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         string-formatted name. By default will be used latest zone;
     key_pair
         name of key_pair to be granted access. Will be fetched from
-        config by default, may be configured per region."""
-
+        config by default, may be configured per region;
+    security_groups
+        list of AWS Security Groups names formatted as string separated
+        with semicolon ';';
+    architecture
+        "i386" or "x86_64".
+    """
     conn = get_region_conn(region_name)
 
     ami_ptrn = config.get('DEFAULT', 'AMI_PTRN')
-    architecture = config.get('DEFAULT', 'ARCHITECTURE')
+    architecture = architecture or config.get('DEFAULT', 'ARCHITECTURE')
     ubuntu_aws_account = config.get('DEFAULT', 'UBUNTU_AWS_ACCOUNT')
     filters = {'owner_id': ubuntu_aws_account, 'architecture': architecture,
              'name': ami_ptrn, 'image_type': 'machine',
              'root_device_type': 'ebs'}
     images = conn.get_all_images(filters=filters)
-
-    # Filtering by latest version.
+    # Filter AMI by latest version.
     ptrn = re.compile(config.get('DEFAULT', 'AMI_REGEXP'))
     versions = set([ptrn.search(img.name).group('version') for img in images])
 
@@ -71,7 +74,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     name_with_version = ami_ptrn_with_version.format(version=latest_version)
     filters.update({'name': name_with_version})
     images = conn.get_all_images(filters=filters)
-    # Filtering by latest release date.
+    # Filter AMI by latest release date.
     dates = set([ptrn.search(img.name).group('released_at') for img in images])
     latest_date = sorted(set(dates))[-1]
     ami_ptrn_with_release_date = config.get('DEFAULT',
@@ -80,26 +83,14 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
     image = conn.get_all_images(filters=filters)[0]
-    zone = zone_name or conn.get_all_zones()[-1].name
-    logger.info('Launching new instance in {zone} using {image}'
-        .format(image=image, zone=zone))
-
-    key_pair = key_pair or config.get(conn.region.name, 'KEY_PAIR')
-    ssh_grp = config.get('DEFAULT', 'SSH_SECURITY_GROUP')
-    reservation = image.run(
-        key_name=key_pair, instance_type='t1.micro', placement=zone,
-        security_groups=security_groups or [ssh_grp])
-    assert len(reservation.instances) == 1, 'More than 1 instances created'
-    inst = reservation.instances[0]
-    wait_for(inst, 'running')
-    logger.info('{inst} created in {zone}'.format(inst=inst, zone=zone))
-
-    return inst
+    return launch_instance_from_ami(
+        region_name, image.id, security_groups=security_groups,
+        key_pair=key_pair, zone_name=zone_name)
 
 
 @contextmanager
-def create_temp_inst(region=None, zone=None, key_pair=None,
-                      security_groups=None, synchronously=False):
+def create_temp_inst(region=None, zone=None, key_pair=None, security_groups='',
+                     synchronously=False):
     if region and zone:
         assert zone in get_region_conn(region.name).get_all_zones(), (
             '{0} doesn\'t belong to {1}'.format(zone, region))
@@ -107,7 +98,7 @@ def create_temp_inst(region=None, zone=None, key_pair=None,
     def create_inst_in_zone(zone, key_pair, sec_grps):
         inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                                security_groups=sec_grps)
-        inst.add_tag(config.get(zone.region.name, 'tag_name'), 'TEMPORARY')
+        inst.add_tag(config.get(zone.region.name, 'TAG_NAME'), 'temporary')
         return inst
 
     if zone:
@@ -171,7 +162,7 @@ def mount_volume(vol, mkfs=False):
         volume to be mounted on the instance it is attached to."""
 
     vol.update()
-    assert vol.attach_data
+    assert vol.attach_data.device
     inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
@@ -189,10 +180,14 @@ def mount_volume(vol, mkfs=False):
 
 
 @contextmanager
-def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
+def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
                     encr=None):
 
     """Attach `snap` to `inst` or to new temporary instance.
+
+    security_groups
+        list of AWS Security Groups names formatted as string separated
+        with semicolon ';'
 
     Yield volume, created from the `snap` and its mountpoint.
 
@@ -209,7 +204,7 @@ def attach_snapshot(snap, key_pair=None, security_groups=None, inst=None,
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
             add_tags(vol, snap.tags)
-            vol.add_tag(config.get(inst.region.name, 'tag_name'), 'TEMPORARY')
+            vol.add_tag(config.get(inst.region.name, 'TAG_NAME'), 'temporary')
             volumes_to_delete.append(vol)
             dev_name = get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
@@ -336,18 +331,13 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
                 logger.info('Ok')
 
         with hide('running', 'stdout'):
-            try:
-                wait_for_sudo('date')
-            except BaseException as err:
-                logger.exception(str(err))
-
             while pw1 == pw2:
                 pw1 = prompt('Type in first password for enryption: ')
                 pw2 = prompt('Type in second password for enryption: ')
                 if pw1 == pw2:
                     logger.info('\nPasswords can\'t be the same.\n')
             logger.info('Installing cryptsetup.....')
-            sudo('apt-get -y install cryptsetup')
+            wait_for_sudo('apt-get -y install cryptsetup')
             sudo('mkdir -p {0}'.format(data))
             try:
                 logger.info('Downloading releases list.....')
@@ -380,7 +370,7 @@ def make_encrypted_ubuntu(host_string, key_filename, user,
             sudo('mount -o loop,ro "{work}/{image}" "{work}/ubuntu"'
                  .format(image=image, work=work))
             logger.info('Creating separate boot volume.....')
-            sudo('echo -e "0 512 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
+            sudo('echo -e "0 1024 83 *\n;\n" | /sbin/sfdisk -uM {dev}'
                  .format(dev=dev))
             logger.info('Formatting boot volume.....')
             sudo('/sbin/mkfs -t ext3 -L "{bootlabel}" "{dev}1"'
@@ -565,7 +555,9 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
 
 
 @task
-def launch_instance_from_ami(region_name, ami_id, inst_type=None):
+def launch_instance_from_ami(
+    region_name, ami_id, inst_type=None, security_groups='', key_pair=None,
+    zone_name=None):
     """Create instance from specified AMI.
 
     region_name
@@ -574,7 +566,15 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
         "ami-..."
     inst_type
         by default will be fetched from AMI description or used
-        't1.micro' if not mentioned in the description."""
+        't1.micro' if not mentioned in the description;
+    security_groups
+        list of AWS Security Groups names formatted as string separated
+        with semicolon ';'
+    key_pair
+        name of key_pair to be granted access. Will be fetched from
+        config by default, may be configured per region;
+    zone_name
+        in string format."""
     try:
         user_data = config.get('user_data', 'USER_DATA')
     except:
@@ -582,30 +582,32 @@ def launch_instance_from_ami(region_name, ami_id, inst_type=None):
     conn = get_region_conn(region_name)
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or get_descr_attr(image, 'Type') or 't1.micro'
-
-    avail_grps = [sec.name for sec in conn.get_all_security_groups()]
-    sec_grps = prompt_to_select(avail_grps, 'Select security groups',
-                                multiple=True)
-    wait_for(image, 'available')
-    reservation = image.run(
-        key_name=config.get(conn.region.name, 'KEY_PAIR'),
-        security_groups=sec_grps,
+    security_groups = filter(None, security_groups.strip(';').split(';'))
+    security_groups.append(new_security_group(conn.region))
+    logger.info('Launching new instance in {reg} using {image}'
+                .format(reg=conn.region, image=image))
+    inst = image.run(
+        key_name=key_pair or config.get(conn.region.name, 'KEY_PAIR'),
+        security_groups=security_groups,
         instance_type=inst_type,
-        user_data=user_data)
-    new_instance = reservation.instances[0]
-    wait_for(new_instance, 'running')
-    add_tags(new_instance, image.tags)
-    modify_instance_termination(conn.region.name, new_instance.id)
+        user_data=user_data,
+        placement=zone_name).instances[0]
+    wait_for(inst, 'running')
+    groups = [grp.name for grp in inst.groups]
+    inst.add_tag('Security Groups', dumps(groups, separators=(',', ':')))
+    add_tags(inst, image.tags)
+    modify_instance_termination(conn.region.name, inst.id)
+    logger.info('{inst} created in {inst.placement}'.format(inst=inst))
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
     key_file = config.get(conn.region.name, 'KEY_FILENAME')
-    logger.info(info.format(inst=new_instance, user=env.user, key=key_file))
-    return new_instance
+    logger.info(info.format(inst=inst, user=env.user, key=key_file))
+    return inst
 
 
 @task
 def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
-               default_arch='x86_64', default_type='t1.micro'):
+               default_arch=None, default_type='t1.micro', security_groups=''):
     """
     Creates AMI image from given snapshot.
 
@@ -625,7 +627,11 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
         architecture to use if not mentioned in snapshot description;
     default_type
         instance type to use if not mentioned in snapshot description.
-        Used only if ``force`` is "RUN"."""
+        Used only if ``force`` is "RUN";
+    security_groups
+        list of AWS Security Groups names formatted as string separated
+        with semicolon ';'. Used only if ``force`` is "RUN".
+    """
     conn = get_region_conn(region)
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
     instance_id = get_snap_instance(snap)
@@ -638,6 +644,7 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
     snapshot = sorted(snapshots, key=get_snap_time,
                       reverse=True) if snapshots else None
     # setup for building an EBS boot snapshot
+    default_arch = default_arch or config.get('DEFAULT', 'ARCHITECTURE')
     arch = get_descr_attr(snap, 'Arch') or default_arch
     kernel = config.get(conn.region.name, 'KERNEL' + arch.upper())
     dev = re.match(r'^/dev/sda$', _device)  # if our instance encrypted
@@ -656,7 +663,8 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
             s_ebs.snapshot_id = s.id
             block_map[s_dev] = s_ebs
 
-    name = 'Created {0} using access key {1}'.format(_now(), conn.access_key)
+    name = 'Created {0} using access key {1}'.format(timestamp(),
+                                                     conn.access_key)
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
@@ -678,18 +686,16 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
             'just created {0}: '.format(image))
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         instance_type = get_descr_attr(snap, 'Type') or default_type
-        new_instance = launch_instance_from_ami(region, image.id,
-                                                inst_type=instance_type)
-    if dev:
-        logger.info('\nTo unlock go to:\n   https://{0}\n'
-                        .format(new_instance.public_dns_name))
+        new_instance = launch_instance_from_ami(
+            region, image.id, inst_type=instance_type,
+            security_groups=security_groups)
     return image, new_instance
 
 
 @task
-def create_encrypted_instance(region_name, release='lucid', volume_size='8',
-                             architecture='x86_64', type='t1.micro',
-                             name='encr_root', pw1=None, pw2=None):
+def create_encrypted_instance(
+    region_name, release='lucid', volume_size='8', architecture=None,
+    type='t1.micro', name='encr_root', pw1=None, pw2=None, security_groups=''):
     """
     Creates ubuntu instance with luks-encryted root volume.
 
@@ -701,12 +707,17 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
         Size of volume in Gb (always remember, that script creates boot volume
         with size 1Gb, so minimal size of whole volume is 3Gb (1Gb for /boot
         2Gb for /)). 8 by default;
+    architecture
+        "i386" or "x86_64".
     type
         Type of instance. 't1.micro' by default;
     name
         Name of luks encrypted volume. 'encr_root' by default;
     pw1, pw2
         You can specify passwords in parameters to suppress password prompt;
+    security_groups
+        List of AWS Security Groups names formatted as string separated
+        with semicolon ';'.
 
     To unlock go to https://ip_address_of_instance (only after reboot
     or shutdown).
@@ -719,33 +730,32 @@ def create_encrypted_instance(region_name, release='lucid', volume_size='8',
     with config_temp_ssh(conn) as key_filename:
         key_pair = os.path.splitext(os.path.split(key_filename)[1])[0]
         zn = conn.get_all_zones()[-1]
-        ssh_grp = config.get('DEFAULT', 'SSH_SECURITY_GROUP')
-        with create_temp_inst(zone=zn, key_pair=key_pair,
-                              security_groups=[ssh_grp]) as inst:
+        with create_temp_inst(zone=zn, key_pair=key_pair) as inst:
             vol = conn.create_volume(size=volume_size, zone=zn)
             dev = get_avail_dev_encr(inst)
             vol.attach(inst.id, dev)
-            if architecture == 'x86_64':
-                arch = 'amd64'
-            else:
-                arch = architecture
+            arch = architecture or config.get('DEFAULT', 'ARCHITECTURE')
+            ubuntu_arch = 'amd64' if arch == 'x86_64' else arch
             make_encrypted_ubuntu(inst.public_dns_name, key_filename, 'ubuntu',
-                                  arch, dev, name, release, pw1, pw2)
+                                  ubuntu_arch, dev, name, release, pw1, pw2)
             description = dumps({
-            'Volume': vol.id,
-            'Region': vol.region.name,
-            'Device': '/dev/sda',
-            'Type': type,
-            'Arch': architecture,
-            'Root_dev_name': '/dev/sda1',
-            'Time': _now(),
+                'Volume': vol.id,
+                'Region': vol.region.name,
+                'Device': '/dev/sda',
+                'Type': type,
+                'Arch': arch,
+                'Root_dev_name': '/dev/sda1',
+                'Time': timestamp(),
             })
             snap = vol.create_snapshot(description)
             wait_for(snap, '100%', limit=20 * 60)
             vol.detach(force=True)
             wait_for(vol, 'available')
             vol.delete()
-            img, new_instance = create_ami(region_name, snap.id, 'RUN')
+            HTTPS_SG = config.get('DEFAULT', 'HTTPS_SECURITY_GROUP')
+            security_groups = ';'.join([security_groups, HTTPS_SG])
+            img, new_instance = create_ami(region_name, snap.id, 'RUN',
+                                           security_groups=security_groups)
             logger.info('\nTo unlock go to:\n   https://{0}\n'
                         .format(new_instance.public_dns_name))
             img.deregister()

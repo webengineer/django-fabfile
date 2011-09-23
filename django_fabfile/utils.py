@@ -7,15 +7,13 @@ from datetime import datetime
 from json import loads
 import logging
 import os
-from pprint import PrettyPrinter
-from pydoc import pager
 import re
 from time import sleep
 from traceback import format_exc
 
 from boto import BotoConfigLocations, connect_ec2
 from boto.ec2 import regions
-from fabric.api import prompt, sudo, task
+from fabric.api import sudo, task
 from fabric.contrib.files import exists
 from pkg_resources import resource_stream
 
@@ -23,6 +21,10 @@ from django_fabfile import __name__ as pkg_name
 
 
 logger = logging.getLogger(__name__)
+
+
+def timestamp():
+    return datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 class Config(object):
@@ -102,41 +104,6 @@ def get_region_conn(region_name=None):
         return connect_ec2(**creds)
 
 
-def prompt_to_select(choices, query='Select from', paging=False,
-                     multiple=False):
-    """Prompt to select an option from provided choices.
-
-    Return solely possible value instantly without prompting.
-
-    :param choices: if dict, then choice will be made among keys.
-    :type choices: list or dict
-    :param paging: render long list with pagination."""
-    keys = list(choices)
-    while keys.count(None):
-        keys.pop(choices.index(None))    # Remove empty values.
-    assert len(keys), 'No choices provided'
-    if len(keys) == 1:
-        return keys[0]
-
-    def in_list(input_, avail_list, multiple=False):
-        selected_list = re.split('[\s,]+', input_)
-        if not multiple:
-            assert len(selected_list) == 1, 'Only one item allowed'
-        for item in selected_list:
-            if not item in avail_list:
-                raise ValueError('{0} not in {1}'.format(item, avail_list))
-        return selected_list if multiple else selected_list[0]
-
-    if paging:
-        pp = PrettyPrinter()
-        pager(query + '\n' + pp.pformat(choices))
-        text = 'Enter your choice or press Return to view options again'
-    else:
-        text = '{query} {choices}'.format(query=query, choices=choices)
-    input_in_list = lambda input_: in_list(input_, choices, multiple)
-    return prompt(text, validate=input_in_list)
-
-
 class StateNotChangedError(Exception):
 
     def __init__(self, state):
@@ -167,6 +134,7 @@ def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
             obj_state = get_state(obj, attrs)
         except Exception as err:
             logger.debug(str(err))
+            sleep(10)
         else:
             break
     logger.debug('Called {0} update'.format(obj))
@@ -308,7 +276,7 @@ def update_volumes_tags(filters=None):
 @contextmanager
 def config_temp_ssh(conn):
     config_name = '{region}-temp-ssh-{now}'.format(
-        region=conn.region.name, now=datetime.utcnow().isoformat())
+        region=conn.region.name, now=timestamp())
     key_pair = conn.create_key_pair(config_name)
     key_filename = key_pair.name + '.pem'
     key_pair.save('./')

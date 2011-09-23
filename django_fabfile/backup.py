@@ -18,9 +18,8 @@ from django_fabfile.instances import (attach_snapshot, create_temp_inst,
                                       get_avail_dev, get_vol_dev, mount_volume)
 from django_fabfile.utils import (
     Config, StateNotChangedError, add_tags, config_temp_ssh,
-    get_descr_attr, get_inst_by_id, get_region_conn,
-    get_snap_time, get_snap_vol, get_snap_device,
-    wait_for, wait_for_sudo)
+    get_descr_attr, get_inst_by_id, get_region_conn, get_snap_device,
+    get_snap_time, get_snap_vol, timestamp, wait_for, wait_for_sudo)
 
 
 config = Config()
@@ -28,9 +27,6 @@ username = config.get('DEFAULT', 'USERNAME')
 env.update({'user': username, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
-
-
-_now = lambda: datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def create_snapshot(vol, description='', tags=None, synchronously=True):
@@ -59,7 +55,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
             'Type': inst.instance_type,
             'Arch': inst.architecture,
             'Root_dev_name': inst.root_device_name,
-            'Time': _now(),
+            'Time': timestamp(),
             })
 
     def initiate_snapshot():
@@ -67,9 +63,9 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
         if tags:
             add_tags(snapshot, tags)
         else:
+            add_tags(snapshot, vol.tags)
             if inst:
                 add_tags(snapshot, inst.tags)
-            add_tags(snapshot, vol.tags)
         logger.info('{0} initiated from {1}'.format(snapshot, vol))
         return snapshot
 
@@ -126,7 +122,8 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         will be fetched from config by default, may be configured
         per region;
     synchronously
-        will be accomplished without checking results. False by default.
+        will be accomplished with assuring successful result. False by
+        default.
 
     .. note:: when ``create_ami`` task compiles AMI from several
               snapshots it restricts snapshot start_time difference with

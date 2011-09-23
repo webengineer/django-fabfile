@@ -34,7 +34,7 @@ def _get_inst_by_id(region, instance_id):
 
 def _sudo(cmd):
     """ Shows output of cmd and allows interaction """
-    sudo(cmd, shell=False, pty=False)
+    sudo(cmd, shell=False, pty=True)
 
 
 def _create_account(username, region, instance_ids, passwordless, sudo):
@@ -88,6 +88,7 @@ def deluser(name, region=None, instance_ids=None):
                 env.username = name
                 _sudo('deluser %(username)s' % env)
     else:
+        env.update({'warn_only': True})
         env.username = name
         _sudo('deluser %(username)s' % env)
 

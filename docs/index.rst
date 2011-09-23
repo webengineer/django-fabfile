@@ -14,10 +14,10 @@ Contents:
    README
    backup
    instances
+   security_groups
    switchdb
    useradd
    utils
-   changelog
 
 Indices and tables
 ==================
