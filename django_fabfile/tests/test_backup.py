@@ -4,7 +4,6 @@ from boto.sqs import regions
 import fudge
 import random
 import string
-#import datetime
 
 from django_fabfile.backup import backup_instance, trim_snapshots
 from django_fabfile.backup import rsync_snapshot
@@ -17,13 +16,11 @@ def key_gen(chars):
     """
     Generator of unique IDs for snapshots, volumes, etc.
     """
-    return ''.join(random.sample(string.ascii_lowercase + string.digits, chars))
+    return ''.join(random.sample(string.ascii_lowercase
+        + string.digits, chars))
 
 
-#------------------------------------------------------------------------------
-# Fake classes to isolate test method from outer space
-# TODO replace following fakes to another file
-#------------------------------------------------------------------------------
+# Fake classes and methods to isolate test method from outer space
 
 
 class Connection():
@@ -34,7 +31,6 @@ class Connection():
     def __init__(self, region_name):
         print '>>> Connection.__init__({0})'.format(region_name)
         self.region = region_name
-        return
 
     def get_all_volumes(self, vol_id):
         """
@@ -79,7 +75,6 @@ class Instance():
                 volume_id=['vol-11', 'vol-12']),
             'dev-2': fudge.Fake('dev-2').has_attr(
                 volume_id=['vol-21', 'vol-22'])}
-        return
 
 
 class Tags():
@@ -89,7 +84,6 @@ class Tags():
 
     def __init__(self):
         print '>>> Tags.__init__()'
-        return
 
     def get(self, name=None):
         if name == 'Name':
@@ -116,11 +110,9 @@ class Snapshot():
         self.region = region
         self.status = 'not error'
         self.start_time = '2011-09-15T15:18:00.000Z'
-        return
 
     def __getitem__(self, key):
         print '>>> Snapshot.__getitem__({0})'.format(key)
-        return
 
 
 def get_region_conn(region_name=None):
@@ -130,7 +122,7 @@ def get_region_conn(region_name=None):
     conn = Connection(region_name)
     print '>>> get_region_conn({0})'.format(region_name)
     print '... return {0}'.format(conn)
-    return conn#'fake:AWSConnection'
+    return conn
 
 
 def get_inst_by_id(region_name, instance_id):
@@ -160,7 +152,6 @@ def delete_broken_snapshots():
     Fake - replacement for 'backup.delete_broken_snapshots()'
     """
     print '>>> delete_broken_snapshots()'
-    return
 
 
 def _trim_snapshots(reg, dry_run):
@@ -168,7 +159,6 @@ def _trim_snapshots(reg, dry_run):
     Fake - replacement for 'backup._trim_snapshots()'
     """
     print '>>> _trim_snapshots({0}, {1})'.format(reg, dry_run)
-    return
 
 
 def get_snap_device(snap):
@@ -198,35 +188,33 @@ class TestBackup(unittest.TestCase):
 
         instance = Instance()
 
-        # Test case #1
+        # During this case the method shoud raise an exception because of leak
+        # of arguments (Either 'instance_id' or 'instance' should be specified)
         print "\nTEST 1 - backup.backup_instance(region_name)"
         self.assertRaises(Exception, backup_instance, 'us-east-1')
 
-        # Test case #2
+        # During this case the methods should return the list of snapshots
         print "\nTEST 2 - backup.backup_instance(region_name, instance_id)"
-        self.assertIsInstance(backup_instance('us-east-1', 'i-12345678'),
-            list, 'Oops, we have catched an assertion error')
+        self.assertIsInstance(backup_instance('us-east-1', 'i-12345678'), list,
+            'The method returns value, that doesn\'t match the specified type')
 
-        # Test case #3
-        #TODO work out with such test issue
         print "\nTEST 3 - backup.backup_instance(region_name, instance)"
         self.assertIsInstance(backup_instance('us-east-1', instance), list,
-            'Oops, we have catched an assertion error')
+            'The method returns value, that doesn\'t match the specified type')
 
-        # Test case #4
         print "\nTEST 4 - backup.backup_instance(region_name," \
             " instance_id, synchronously)"
         self.assertIsInstance(backup_instance('us-east-1', 'i-12345678',
             synchronously=True), list,
-            'Oops, we have catched an assertion error')
+            'The method returns value, that doesn\'t match the specified type')
 
-        # Test case #5
+        # During this case the method shoud raise an exception because of
+        # excess of arguments (Either 'instance_id' or 'instance'
+        # should be specified)
         print "\nTEST 5 - backup.backup_instance(region_name," \
             " instance_id, instance)"
         self.assertRaises(Exception, backup_instance, 'us-east-1',
             'i-12345678', instance)
-
-        return
 
     @fudge.patch(test_pkg + 'get_region_conn',
         test_pkg + 'delete_broken_snapshots', test_pkg + '_trim_snapshots')
@@ -235,28 +223,28 @@ class TestBackup(unittest.TestCase):
         fakeMethod2.is_callable().calls(delete_broken_snapshots)
         fakeMethod3.is_callable().calls(_trim_snapshots)
 
+        # The methods should remove either specified or all of the old
+        # snapsots, and not raise any exception in regular call
         print "\nTEST 1 - backup.trim_snapshots(region_name)"
         self.assertIsNone(trim_snapshots('us-east-1'),
-            'Oops, we have catched an error')
+            'The exception has been raised during testing. Please check')
 
         print "\nTEST 2 - backup.trim_snapshots()"
-        self.assertIsNone(trim_snapshots(), 'Oops, we have catched an error')
-
-        return
+        self.assertIsNone(trim_snapshots(),
+            'The exception has been raised during testing. Please check')
 
     @fudge.patch(test_pkg + 'get_region_conn', test_pkg + 'get_snap_device')
     def test_rsync_snapshot(self, fakeMethod1, fakeMethod2):
-        #rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
-        #    src_inst=None, dst_inst=None)
         fakeMethod1.is_callable().calls(get_region_conn)
         fakeMethod2.is_callable().calls(get_snap_device)
 
+        # The method should duplicate the method into another region, and not
+        # raise any exception in regular call
         print "\nCALL for backup.rsync_snapshot(src_region_name," \
             " snapshot_id, dst_region_name)"
         self.assertIsNone(rsync_snapshot('us-east-1', 'snap-12345678',
-            'us-west-1'), 'Oops, we have catched an error')
-
-        return
+            'us-west-1'),
+            'The exception has been raised during testing. Please check')
 
 
 if __name__ == '__main__':
