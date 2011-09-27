@@ -1,5 +1,3 @@
-__version__ = '2011.09.21.2'
-
 from datetime import date
 import logging
 import os
@@ -8,6 +6,7 @@ import sys
 from fabric.api import output
 
 from django_fabfile.utils import Config
+from django_fabfile.version import __version__
 
 
 __copyright__ = ('2010-{0}, oDesk http://www.odesk.com/. '
