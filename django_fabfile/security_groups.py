@@ -52,7 +52,7 @@ def cleanup_security_groups(delete=False):
             for rule in s_g.rules:
                 for grant in rule.grants:
                     if grant.name and grant.owner_id == s_g.owner_id:
-                        used_groups.add(s_g.name)   # SG is used by group.
+                        used_groups.add(grant.name)     # SG is used by group.
     for grp in used_groups:
         del groups[grp]
 
@@ -104,11 +104,11 @@ def sync_rules(src_grp, dst_grp=None, dst_region=None):
     # Assure granted group represented in destination region.
     src_grants = chain(*src_rules.values())
     for grant in dict((grant.name, grant) for grant in src_grants).values():
-        if grant.name and grant.owner_id == src_grp.owner_id:
-            if not is_group_in(dst_grp.region, grant.name):
-                src_conn = get_region_conn(src_grp.region.name)
-                grant_grp = src_conn.get_all_security_groups([grant.name])[0]
-                sync_rules(grant_grp, dst_region=dst_grp.region)
+        if (grant.name and grant.owner_id == src_grp.owner_id and
+                not is_group_in(dst_grp.region, grant.name)):
+            src_conn = get_region_conn(src_grp.region.name)
+            grant_grp = src_conn.get_all_security_groups([grant.name])[0]
+            sync_rules(grant_grp, dst_region=dst_grp.region)
     dst_rules = regroup_rules(dst_grp)
     # Remove rules absent in src_grp.
     for ports in set(dst_rules.keys()) - set(src_rules.keys()):
@@ -173,9 +173,9 @@ def sync_rules_by_id(src_reg_name, src_grp_id, dst_reg_name, dst_grp_id):
     :param dst_grp_id: group ID
     :type dst_grp_id: str"""
     src_grp = get_region_conn(src_reg_name).get_all_security_groups(
-        filters={'group-id': src_grp_id})
+        filters={'group-id': src_grp_id})[0]
     dst_grp = get_region_conn(dst_reg_name).get_all_security_groups(
-        filters={'group-id': dst_grp_id})
+        filters={'group-id': dst_grp_id})[0]
     sync_rules(src_grp, dst_grp)
 
 
