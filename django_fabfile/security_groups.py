@@ -1,21 +1,29 @@
 from collections import defaultdict
 from contextlib import contextmanager
-from itertools import chain
+from itertools import chain, groupby
+from hashlib import sha256
 import logging
+from operator import attrgetter
+from warnings import warn
 
 from boto.exception import EC2ResponseError
 from fabric.api import task
 
-from django_fabfile.utils import get_region_conn, timestamp
+from django_fabfile.utils import Config, get_region_conn, timestamp
 
+
+config = Config()
 
 logger = logging.getLogger(__name__)
+
+
+INST_SPECIFIC_SG_PREFIX = 'Created on '
 
 
 def new_security_group(region, name=None, description=None):
     """Create Security Groups with SSH access."""
     s_g = get_region_conn(region.name).create_security_group(
-        name or 'Created on {0}'.format(timestamp()),
+        name or INST_SPECIFIC_SG_PREFIX + timestamp(),
         description or 'Created for using with specific instance')
     s_g.authorize('tcp', 22, 22, '0.0.0.0/0')
     return s_g
@@ -33,7 +41,8 @@ def cleanup_security_groups(delete=False):
     it is treated as used.
     """
     groups = defaultdict(lambda: {})
-    used_groups = set(['default', ])
+    used_groups = set(['default',
+                       config.get('DEFAULT', 'HTTPS_SECURITY_GROUP')])
     regions = get_region_conn().get_all_regions()
     for reg in regions:
         for s_g in get_region_conn(reg.name).get_all_security_groups():
@@ -64,16 +73,24 @@ def regroup_rules(security_group):
         ports = rule.ip_protocol, rule.from_port, rule.to_port
         for grant in rule.grants:
             grouped_rules[ports].append(grant)
+    for rule in grouped_rules:  # Ordering for hashing.
+        grouped_rules[rule] = tuple(sorted(grouped_rules[rule], key=str))
     return grouped_rules
 
 
-def sync_rules(src_grp, dst_grp):
+def sync_rules(src_grp, dst_grp=None, dst_region=None):
     """
     Copy Security Group rules.
 
-    Works across regions as well. The sole exception is granted groups,
-    owned by another user - such groups can't be copied recursively.
+    Works across regions as well. The sole exception that won't be
+    synced is granted groups, owned by another user - such groups can't
+    be copied recursively.
     """
+    assert bool(dst_grp) ^ bool(dst_region), ('Only dst_grp or dst_region '
+                                              'should be provided')
+    if dst_region:
+        dst_grp = new_security_group(dst_region, src_grp.name,
+                                                 src_grp.description)
 
     def is_group_in(region, group_name):
         try:
@@ -91,10 +108,7 @@ def sync_rules(src_grp, dst_grp):
             if not is_group_in(dst_grp.region, grant.name):
                 src_conn = get_region_conn(src_grp.region.name)
                 grant_grp = src_conn.get_all_security_groups([grant.name])[0]
-                dst_conn = get_region_conn(dst_grp.region.name)
-                grant_copy = dst_conn.create_security_group(
-                    grant_grp.name, grant_grp.description)
-                sync_rules(grant_grp, grant_copy)
+                sync_rules(grant_grp, dst_region=dst_grp.region)
     dst_rules = regroup_rules(dst_grp)
     # Remove rules absent in src_grp.
     for ports in set(dst_rules.keys()) - set(src_rules.keys()):
@@ -144,7 +158,7 @@ def sync_rules(src_grp, dst_grp):
 
 
 @task
-def sync_ryles_by_id(src_reg_name, src_grp_id, dst_reg_name, dst_grp_id):
+def sync_rules_by_id(src_reg_name, src_grp_id, dst_reg_name, dst_grp_id):
     """Update Security Group rules from other Security Group.
 
     Works across regions as well. The sole exception is granted groups,
@@ -163,3 +177,78 @@ def sync_ryles_by_id(src_reg_name, src_grp_id, dst_reg_name, dst_grp_id):
     dst_grp = get_region_conn(dst_reg_name).get_all_security_groups(
         filters={'group-id': dst_grp_id})
     sync_rules(src_grp, dst_grp)
+
+
+@task
+def replicate_security_groups(filters=None):
+    """
+    Replicate updates of Security Groups among regions.
+
+    :param filters: restrict replication to subset of Security Groups,
+        see available options at
+        http://docs.amazonwebservices.com/AWSEC2/latest/APIReference/ApiReference-query-DescribeSecurityGroups.html.
+        Not available while running as Fabric task because it should be
+        of `dict` type.
+    :type filters: dict
+
+
+    Per-instance Security Groups without additional rules won't be
+    replicated.
+
+    Raises warnings about synchronization issues that requires manual
+    resolution.
+    """
+    HASH, TIMESTAMP = 'Hash', 'Version'     # Tag names.
+
+    def get_hash(s_g):
+        """
+        Return unique hash for Security Group rules.
+
+        Granted Security Groups will be respected identical if them
+        belongs to identical owner and identically named irrespectively
+        to region.
+        """
+        return sha256(str(regroup_rules(s_g).items())).hexdigest()
+
+    def was_updated(s_g):
+        """Returns True if Security Group was modified or just created."""
+        return HASH not in s_g.tags or get_hash(s_g) != s_g.tags[HASH]
+
+    regions = get_region_conn().get_all_regions()
+    blank_group = new_security_group(regions[0])
+    security_groups = []
+    for reg in regions:
+        for s_g in get_region_conn(reg.name).get_all_security_groups(
+                filters=filters):
+            security_groups.append(s_g)
+    name = attrgetter('name')
+    grp_by_name = groupby(sorted(security_groups, key=name), key=name)
+    for name, grp_in_regions in grp_by_name:
+        grp_in_regions = list(grp_in_regions)
+        versions = set(get_hash(s_g) for s_g in grp_in_regions)
+        old_vers = [s_g for s_g in grp_in_regions if not was_updated(s_g)]
+        if len(set(s_g.tags[HASH] for s_g in old_vers)) > 1:
+            warn('Old versions of {0} should be synced manually'.format(name))
+            continue
+        if len(versions) == 2 and old_vers:  # Update olds to new version.
+            new = [grp for grp in grp_in_regions if was_updated(grp)][0]
+            for prev in old_vers:
+                sync_rules(new, prev)
+        elif not len(versions) == 1:
+            warn('More than 1 new versions of {0} found. Synchronization '
+                 'can\'t be applied.'.format(name))
+            continue
+        # Clone to all regions if not yet cloned.
+        if (len(grp_in_regions) < len(regions) and
+            not (name.startswith(INST_SPECIFIC_SG_PREFIX) and
+                 get_hash(grp_in_regions[0]) == get_hash(blank_group))):
+            s_g_regions = set(s_g.region.name for s_g in grp_in_regions)
+            for reg_name in set(reg.name for reg in regions) - s_g_regions:
+                region = get_region_conn(reg_name).region
+                sync_rules(grp_in_regions[0], dst_region=region)
+        # Update tags.
+        mark = timestamp()
+        for s_g in grp_in_regions:
+            s_g.add_tag(HASH, get_hash(s_g))
+            s_g.add_tag(TIMESTAMP, mark)
+    blank_group.delete()

@@ -1,15 +1,23 @@
 Change Log
 **********
 
+Version 2011.09.27.1
+--------------------
+
+Added security groups replication
+:func:`django_fabfile.security_groups.replicate_security_groups`.
+
 Version 2011.09.21.1
 --------------------
 
-Added security groups synchronization.
+Added security groups synchronization
+:func:`django_fabfile.security_groups.sync_rules` and corresponding
+Fabric task :func:`django_fabfile.security_groups.sync_rules_by_id`.
 
 Version 2011.09.15.1
 --------------------
 
-Accept `security_groups` argument only formatted as string separated
+Accept ``security_groups`` argument only formatted as string separated
 with semicolons ';'.
 
 Version 2011.09.14.1
