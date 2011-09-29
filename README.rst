@@ -152,6 +152,16 @@ Following backup commands may be configured with crontab to run daily::
 With 30 production instances it tooks around 6 hours to replicate
 snapshots updates. First replication tooks much more time obviously.
 
+Running tests
+-------------
+
+The package has test cases to make sure, that all methods, being tested,
+keep on the entire program logic. The test cases are using packages ``fudge``
+and ``unittest``. The test files (``'test_*.py'``) are located in folder
+``'/django_fabfile/tests/'``. To run tests from command line, implement::
+
+    [path_to_tests]/python test_*.py
+
 Recent changes
 --------------
 
