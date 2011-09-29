@@ -160,7 +160,7 @@ keep on the entire program logic. The test cases are using packages ``fudge``
 and ``unittest``. The test files (``'test_*.py'``) are located in folder
 ``'/django_fabfile/tests/'``. To run tests from command line, implement::
 
-    [path_to_tests]/python test_*.py
+    python -m unittest discover django_fabfile
 
 Recent changes
 --------------
