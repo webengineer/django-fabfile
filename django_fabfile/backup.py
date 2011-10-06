@@ -43,7 +43,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
         tags to be added to snapshot. Will be cloned from volume by
         default."""
     if vol.attach_data:
-        inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+        inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     else:
         inst = None
     if not description and inst:
@@ -102,7 +102,7 @@ def backup_instance(region_name, instance_id=None, instance=None,
         'instance should be specified')
     conn = get_region_conn(region_name)
     if instance_id:
-        instance = get_inst_by_id(conn.region, instance_id)
+        instance = get_inst_by_id(conn.region.name, instance_id)
     snapshots = []
     for dev in instance.block_device_mapping:
         vol_id = instance.block_device_mapping[dev].volume_id
@@ -392,8 +392,10 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
     snapshot (if exists) of the same volume in destination region if
     ``delete_old`` is True."""
 
-    src_inst = get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
-    dst_inst = get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
+    src_inst = get_inst_by_id(src_vol.region.name,
+                              src_vol.attach_data.instance_id)
+    dst_inst = get_inst_by_id(dst_vol.region.name,
+                              dst_vol.attach_data.instance_id)
     rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                      encr)
     if dst_vol.snapshot_id:

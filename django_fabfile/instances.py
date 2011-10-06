@@ -142,7 +142,7 @@ def get_avail_dev_encr(instance):
 def get_vol_dev(vol):
     """Return OS-specific volume representation as attached device."""
     assert vol.attach_data.instance_id
-    inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     assert inst.public_dns_name     # Instance is down.
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     attached_dev = vol.attach_data.device
@@ -163,7 +163,7 @@ def mount_volume(vol, mkfs=False):
 
     vol.update()
     assert vol.attach_data.device
-    inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+    inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
         dev = get_vol_dev(vol)
@@ -278,7 +278,7 @@ def modify_kernel(region, instance_id):
         us-west-1       i386    aki-99a0f1dc"""
     key_filename = config.get(region, 'KEY_FILENAME')
     conn = get_region_conn(region)
-    instance = get_inst_by_id(conn.region, instance_id)
+    instance = get_inst_by_id(conn.region.name, instance_id)
     env.update({
         'host_string': instance.public_dns_name,
         'key_filename': key_filename,
@@ -513,7 +513,7 @@ def modify_instance_termination(region, instance_id):
     You must change value of preconfigured tag_name and run this command
     before terminating production instance via API."""
     conn = get_region_conn(region)
-    inst = get_inst_by_id(conn.region, instance_id)
+    inst = get_inst_by_id(conn.region.name, instance_id)
     prod_tag = config.get(conn.region.name, 'TAG_NAME')
     prod_val = config.get(conn.region.name, 'TAG_VALUE')
     inst_tag_val = inst.tags.get(prod_tag)
@@ -532,7 +532,7 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
         None."""
 
     conn = get_region_conn(region_name)
-    inst = get_inst_by_id(conn.region, inst_id) if inst_id else None
+    inst = get_inst_by_id(conn.region.name, inst_id) if inst_id else None
     snap = conn.get_all_snapshots(snapshot_ids=[snap_id, ])[0]
 
     info = ('\nYou may now SSH into the {inst} server, using:'
@@ -544,7 +544,7 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
             info += ('\nand mount {device}. NOTE: device name may be '
                      'altered by system.')
         key_file = config.get(conn.region.name, 'KEY_FILENAME')
-        inst = get_inst_by_id(conn.region, vol.attach_data.instance_id)
+        inst = get_inst_by_id(conn.region.name, vol.attach_data.instance_id)
         logger.info(info.format(inst=inst, user=env.user, key=key_file,
             device=vol.attach_data.device, mountpoint=mountpoint))
 

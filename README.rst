@@ -26,7 +26,7 @@ sections case)::
 
     FABFILE = {
         'DEFAULT': {
-            LOGGING_FOLDER = '.',
+            'LOGGING_FOLDER': '.',
         },
         'Credentials': {
             'AWS_ACCESS_KEY_ID': 'AKIAABCDEFGHIJKLMNOP',

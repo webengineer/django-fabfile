@@ -243,8 +243,8 @@ def get_snap_time(snap):
     return datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
 
 
-def get_inst_by_id(region, instance_id):
-    res = get_region_conn(region.name).get_all_instances([instance_id, ])
+def get_inst_by_id(region_name, instance_id):
+    res = get_region_conn(region_name).get_all_instances([instance_id, ])
     assert len(res) == 1, (
         'Returned more than 1 {0} for instance_id {1}'.format(res,
                                                       instance_id))
