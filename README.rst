@@ -142,7 +142,8 @@ Following backup commands may be configured with crontab to run daily::
     VE=/home/backup-agent/.virtualenvs/backup
 
     . $VE/bin/activate && \
-    fab -f $VE/lib/python2.6/site-packages/django_fabfile/backup.py \
+    fab --keepalive=15 -f \
+            $VE/lib/python2.6/site-packages/django_fabfile/backup.py \
             backup_instances_by_tag \
             trim_snapshots \
             rsync_region:src_region_name=us-east-1,dst_region_name=eu-west-1 \
