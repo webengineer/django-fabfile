@@ -372,7 +372,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                     '--exclude /var/lib/ec2/* --exclude=/mnt/* '
                     '--exclude=/proc/* --exclude=/tmp/* '
                     '{src_mnt}/ root@{rhost}:{dst_mnt}')
-                sudo(cmd.format(
+                wait_for_sudo(cmd.format(
                     rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                     key_file=dst_key_filename, src_mnt=src_mnt))
                 label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
