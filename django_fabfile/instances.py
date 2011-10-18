@@ -684,6 +684,7 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
 
     info = ('\nEnter RUN if you want to launch instance using '
             'just created {0}: '.format(image))
+    new_instance = None
     if force == 'RUN' or raw_input(info).strip() == 'RUN':
         instance_type = get_descr_attr(snap, 'Type') or default_type
         new_instance = launch_instance_from_ami(
