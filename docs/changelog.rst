@@ -1,6 +1,13 @@
 Change Log
 **********
 
+Version 2011.10.19.1
+--------------------
+
+Introduced consistent snapshots (disabled by default) for preventing files
+corruption that was caused by not synced and not locked filesystem. Filesystem
+lock lasts 10 seconds.
+
 Version 2011.09.27.1
 --------------------
 
