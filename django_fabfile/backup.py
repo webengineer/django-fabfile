@@ -112,14 +112,18 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
 @task
 def backup_instance(region_name, instance_id=None, instance=None,
                     synchronously=False, consistent=False):
-    """Return list of created snapshots for specified instance.
+    """
+    Return list of created snapshots for specified instance.
 
     region_name
         instance location;
     instance, instance_id
         either `instance_id` or `instance` argument should be specified;
     synchronously
-        wait for completion. False by default."""
+        wait for completion. False by default.
+    consistent
+        if True, then FS mountpoint will be frozen before snapshotting.
+    """
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     conn = get_region_conn(region_name)
@@ -146,7 +150,9 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         per region;
     synchronously
         will be accomplished with assuring successful result. False by
-        default.
+        default;
+    consistent
+        if True, then FS mountpoint will be frozen before snapshotting.
 
     .. note:: when ``create_ami`` task compiles AMI from several
               snapshots it restricts snapshot start_time difference with
