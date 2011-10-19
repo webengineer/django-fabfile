@@ -243,15 +243,15 @@ def get_snap_time(snap):
     return datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
 
 
-def get_inst_by_id(region, instance_id):
-    res = get_region_conn(region.name).get_all_instances([instance_id, ])
+def get_inst_by_id(region_name, instance_id):
+    res = get_region_conn(region_name).get_all_instances([instance_id, ])
     assert len(res) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(res,
-                                                      instance_id))
+        'Returned {0} instead of 1 reservation for {1}'.format(res,
+                                                               instance_id))
     instances = res[0].instances
     assert len(instances) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(instances,
-                                                              instance_id))
+        'Returned {0} instead of 1 instance for {1}'.format(instances,
+                                                            instance_id))
     return instances[0]
 
 

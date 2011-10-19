@@ -5,8 +5,8 @@ Required arrangements
 ---------------------
 
 .. note:: `django_fabfile` package should be listed in your path. It's already
-   in place if your are installed it using `pip install django-fabfile` from
-   http://pypi.odeskps.com/. But if you are working within repository, then::
+   in place if your are installed it using `pip install django-fabfile`. But if
+   you are working within repository, then::
 
     export PYTHONPATH=<path-to-folder-with-django_fabfile-package>
 
@@ -26,7 +26,7 @@ sections case)::
 
     FABFILE = {
         'DEFAULT': {
-            LOGGING_FOLDER = '.',
+            'LOGGING_FOLDER': '.',
         },
         'Credentials': {
             'AWS_ACCESS_KEY_ID': 'AKIAABCDEFGHIJKLMNOP',
