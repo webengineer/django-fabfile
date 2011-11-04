@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2011.11.04.1
+--------------------
+
+Fixed error in :func:`django_fabfile.utils.get_inst_by_id` caused by distinct
+responses from `boto` :func:`get_all_instances`.
+
 Version 2011.10.19.1
 --------------------
 

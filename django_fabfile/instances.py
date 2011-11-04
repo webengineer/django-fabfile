@@ -143,7 +143,7 @@ def get_vol_dev(vol):
     """Return OS-specific volume representation as attached device."""
     assert vol.attach_data.instance_id
     inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
-    assert inst.public_dns_name     # Instance is down.
+    assert inst.public_dns_name, 'Instance is down'
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
@@ -545,6 +545,7 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
                      'altered by system.')
         key_file = config.get(conn.region.name, 'KEY_FILENAME')
         inst = get_inst_by_id(conn.region.name, vol.attach_data.instance_id)
+        assert inst
         logger.info(info.format(inst=inst, user=env.user, key=key_file,
             device=vol.attach_data.device, mountpoint=mountpoint))
 
