@@ -255,13 +255,15 @@ def get_inst_by_id(region_name, instance_id):
             return
         else:
             raise
-    assert len(res) == 1, (
-        'Returned {0} instead of 1 reservation for {1}'.format(res,
-                                                               instance_id))
+    else:
+        if not res:
+            return
+    tpl = 'Returned {res} instead of 1 {type_} for {id_}'
+    assert len(res) == 1, tpl.format(res=res, type_='reservation',
+                                     id_=instance_id)
     instances = res[0].instances
-    assert len(instances) == 1, (
-        'Returned {0} instead of 1 instance for {1}'.format(instances,
-                                                            instance_id))
+    assert len(instances) == 1, tpl.format(res=instances, type_='instance',
+                                           id_=instance_id)
     return instances[0]
 
 
