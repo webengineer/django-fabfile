@@ -29,7 +29,8 @@ env.update({'user': username, 'disable_known_hosts': True})
 logger = logging.getLogger(__name__)
 
 
-def create_snapshot(vol, description='', tags=None, synchronously=True):
+def create_snapshot(vol, description='', tags=None, synchronously=True,
+                    consistent=False):
     """Return new snapshot for the volume.
 
     vol
@@ -41,9 +42,13 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
         parameters by default;
     tags
         tags to be added to snapshot. Will be cloned from volume by
-        default."""
+        default.
+    consistent
+        if consistent True, script will try to freeze fs mountpoint and create 
+        snapshot while it's freezed with all buffers dumped to disk.
+    """
     if vol.attach_data:
-        inst = get_inst_by_id(vol.region, vol.attach_data.instance_id)
+        inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     else:
         inst = None
     if not description and inst:
@@ -58,7 +63,24 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
             'Time': timestamp(),
             })
 
+    def freeze_volume():
+        key_filename = config.get(inst.region.name, 'KEY_FILENAME')
+        with settings(host_string=inst.public_dns_name,
+                      key_filename=key_filename):
+            sudo('mountpoint=`mount | grep "{0}" | cut -d " " -f 3`;'
+                 ' if [ "$mountpoint" != "" ]; then screen -d -m sh '
+                 '-c "sleep 10; xfs_freeze -u $mountpoint" && '
+                 'xfs_freeze -f $mountpoint; fi'
+                 .format(vol.attach_data.device), pty=False)
+
     def initiate_snapshot():
+        if consistent:
+            if inst.state=='running':
+                try:
+                    freeze_volume()
+                except:
+                    logger.info('FS NOT FREEZED! '
+                                'Do you have access to this server?')
         snapshot = vol.create_snapshot(description)
         if tags:
             add_tags(snapshot, tags)
@@ -89,31 +111,36 @@ def create_snapshot(vol, description='', tags=None, synchronously=True):
 
 @task
 def backup_instance(region_name, instance_id=None, instance=None,
-                    synchronously=False):
-    """Return list of created snapshots for specified instance.
+                    synchronously=False, consistent=False):
+    """
+    Return list of created snapshots for specified instance.
 
     region_name
         instance location;
     instance, instance_id
         either `instance_id` or `instance` argument should be specified;
     synchronously
-        wait for completion. False by default."""
+        wait for completion. False by default.
+    consistent
+        if True, then FS mountpoint will be frozen before snapshotting.
+    """
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
     conn = get_region_conn(region_name)
     if instance_id:
-        instance = get_inst_by_id(conn.region, instance_id)
+        instance = get_inst_by_id(conn.region.name, instance_id)
     snapshots = []
     for dev in instance.block_device_mapping:
         vol_id = instance.block_device_mapping[dev].volume_id
         vol = conn.get_all_volumes([vol_id])[0]
-        snapshots.append(create_snapshot(vol, synchronously=synchronously))
+        snapshots.append(create_snapshot(vol, synchronously=synchronously,
+                         consistent=consistent))
     return snapshots
 
 
 @task
 def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
-                            synchronously=False):
+                            synchronously=False, consistent=False):
     """Creates backup for all instances with given tag in region.
 
     region_name
@@ -123,7 +150,9 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
         per region;
     synchronously
         will be accomplished with assuring successful result. False by
-        default.
+        default;
+    consistent
+        if True, then FS mountpoint will be frozen before snapshotting.
 
     .. note:: when ``create_ami`` task compiles AMI from several
               snapshots it restricts snapshot start_time difference with
@@ -142,7 +171,7 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
                    'tag-value': tag_value}
         for tag in conn.get_all_tags(filters=filters):
             backup_instance(reg.name, instance_id=tag.res_id,
-                            synchronously=synchronously)
+                            synchronously=synchronously, consistent=consistent)
 
 
 def _trim_snapshots(region, dry_run=False):
@@ -372,7 +401,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                     '--exclude /var/lib/ec2/* --exclude=/mnt/* '
                     '--exclude=/proc/* --exclude=/tmp/* '
                     '{src_mnt}/ root@{rhost}:{dst_mnt}')
-                sudo(cmd.format(
+                wait_for_sudo(cmd.format(
                     rhost=dst_inst.public_dns_name, dst_mnt=dst_mnt,
                     key_file=dst_key_filename, src_mnt=src_mnt))
                 label = sudo('e2label {0}'.format(get_vol_dev(src_vol)))
@@ -382,6 +411,11 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                 sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
             wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
                           '/root/.ssh/authorized_keys')
+            wait_for_sudo('mountpoint=`mount | grep "{0}" | cut -d " " -f 3`;'
+                 ' if [ "$mountpoint" != "" ]; then screen -d -m sh '
+                 '-c "sleep 10; xfs_freeze -u $mountpoint" && '
+                 'xfs_freeze -f $mountpoint; fi'
+                 .format(dst_vol), pty=False)
 
 
 def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
@@ -392,8 +426,10 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
     snapshot (if exists) of the same volume in destination region if
     ``delete_old`` is True."""
 
-    src_inst = get_inst_by_id(src_vol.region, src_vol.attach_data.instance_id)
-    dst_inst = get_inst_by_id(dst_vol.region, dst_vol.attach_data.instance_id)
+    src_inst = get_inst_by_id(src_vol.region.name,
+                              src_vol.attach_data.instance_id)
+    dst_inst = get_inst_by_id(dst_vol.region.name,
+                              dst_vol.attach_data.instance_id)
     rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                      encr)
     if dst_vol.snapshot_id:

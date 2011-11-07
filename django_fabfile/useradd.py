@@ -1,7 +1,7 @@
 from fabric.api import env, settings, sudo, abort, put, task
 from os.path import isfile as _isfile
 
-from django_fabfile.utils import Config, get_region_conn
+from django_fabfile.utils import Config, get_inst_by_id
 
 
 config = Config()
@@ -17,19 +17,6 @@ else:
         env.update({'user': preconfigured_user})
 
 env.update({'disable_known_hosts': True})
-
-
-def _get_inst_by_id(region, instance_id):
-    conn = get_region_conn(region)
-    res = conn.get_all_instances([instance_id, ])
-    assert len(res) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(res,
-                                                      instance_id))
-    instances = res[0].instances
-    assert len(instances) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(instances,
-                                                              instance_id))
-    return instances[0]
 
 
 def _sudo(cmd):
@@ -78,7 +65,7 @@ def deluser(name, region=None, instance_ids=None):
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
             if inst:
-                _instance = _get_inst_by_id(region, inst)
+                _instance = get_inst_by_id(region, inst)
                 if not env.key_filename:
                     key_filename = config.get(_instance.region.name,
                                                       'KEY_FILENAME')
@@ -115,7 +102,7 @@ def adduser(username, region=None, instance_ids=None,
         instances_ids = list(unicode(instance_ids).split(';'))
         for inst in instances_ids:
             if inst:
-                _instance = _get_inst_by_id(region, inst)
+                _instance = get_inst_by_id(region, inst)
                 if not env.key_filename:
                     key_filename = config.get(_instance.region.name,
                                                       'KEY_FILENAME')

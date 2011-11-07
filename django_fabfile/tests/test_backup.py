@@ -23,6 +23,15 @@ def key_gen(chars):
 # Fake classes and methods to isolate test method from outer space
 
 
+class RegionInfo(object):
+
+    def __init__(self, region_name):
+        self.name = region_name
+
+    def __repr__(self):
+        return 'RegionInfo:%s' % self.name
+
+
 class Connection():
     """
     Fake - replacement for class 'boto.connection.Connection'
@@ -30,7 +39,7 @@ class Connection():
 
     def __init__(self, region_name):
         print '>>> Connection.__init__({0})'.format(region_name)
-        self.region = region_name
+        self.region = RegionInfo(region_name)
 
     def get_all_volumes(self, vol_id):
         """

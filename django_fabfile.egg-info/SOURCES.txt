@@ -19,6 +19,8 @@ django_fabfile.egg-info/dependency_links.txt
 django_fabfile.egg-info/not-zip-safe
 django_fabfile.egg-info/requires.txt
 django_fabfile.egg-info/top_level.txt
+django_fabfile/tests/__init__.py
+django_fabfile/tests/test_backup.py
 docs/Makefile
 docs/README.rst
 docs/backup.rst
@@ -27,6 +29,7 @@ docs/conf.py
 docs/index.rst
 docs/instances.rst
 docs/license.txt
+docs/security_groups.rst
 docs/switchdb.rst
 docs/useradd.rst
 docs/utils.rst

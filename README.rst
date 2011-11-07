@@ -5,8 +5,8 @@ Required arrangements
 ---------------------
 
 .. note:: `django_fabfile` package should be listed in your path. It's already
-   in place if your are installed it using `pip install django-fabfile` from
-   http://pypi.odeskps.com/. But if you are working within repository, then::
+   in place if your are installed it using `pip install django-fabfile`. But if
+   you are working within repository, then::
 
     export PYTHONPATH=<path-to-folder-with-django_fabfile-package>
 
@@ -26,7 +26,7 @@ sections case)::
 
     FABFILE = {
         'DEFAULT': {
-            LOGGING_FOLDER = '.',
+            'LOGGING_FOLDER': '.',
         },
         'Credentials': {
             'AWS_ACCESS_KEY_ID': 'AKIAABCDEFGHIJKLMNOP',
@@ -142,7 +142,7 @@ Following backup commands may be configured with crontab to run daily::
     VE=/home/backup-agent/.virtualenvs/backup
 
     . $VE/bin/activate && \
-    fab -f $VE/lib/python2.6/site-packages/django_fabfile/backup.py \
+    fab --keepalive=60 -f $VE/lib/python2.6/site-packages/django_fabfile/backup.py \
             backup_instances_by_tag \
             trim_snapshots \
             rsync_region:src_region_name=us-east-1,dst_region_name=eu-west-1 \

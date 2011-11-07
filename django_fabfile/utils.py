@@ -13,6 +13,7 @@ from traceback import format_exc
 
 from boto import BotoConfigLocations, connect_ec2
 from boto.ec2 import regions
+from boto.exception import EC2ResponseError
 from fabric.api import sudo, task
 from fabric.contrib.files import exists
 from pkg_resources import resource_stream
@@ -243,15 +244,26 @@ def get_snap_time(snap):
     return datetime.strptime(snap.start_time, '%Y-%m-%dT%H:%M:%S.000Z')
 
 
-def get_inst_by_id(region, instance_id):
-    res = get_region_conn(region.name).get_all_instances([instance_id, ])
-    assert len(res) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(res,
-                                                      instance_id))
+def get_inst_by_id(region_name, instance_id):
+    """Return Instance or None.
+
+    Raise AssertionError if more that one Instance returned."""
+    try:
+        res = get_region_conn(region_name).get_all_instances([instance_id, ])
+    except EC2ResponseError, err:
+        if err.error_code == 'InvalidInstanceID.NotFound':
+            return
+        else:
+            raise
+    else:
+        if not res:
+            return
+    tpl = 'Returned {res} instead of 1 {type_} for {id_}'
+    assert len(res) == 1, tpl.format(res=res, type_='reservation',
+                                     id_=instance_id)
     instances = res[0].instances
-    assert len(instances) == 1, (
-        'Returned more than 1 {0} for instance_id {1}'.format(instances,
-                                                              instance_id))
+    assert len(instances) == 1, tpl.format(res=instances, type_='instance',
+                                           id_=instance_id)
     return instances[0]
 
 

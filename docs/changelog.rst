@@ -1,6 +1,19 @@
 Change Log
 **********
 
+Version 2011.11.04.1
+--------------------
+
+Fixed error in :func:`django_fabfile.utils.get_inst_by_id` caused by distinct
+responses from `boto` :func:`get_all_instances`.
+
+Version 2011.10.19.1
+--------------------
+
+Introduced consistent snapshots (disabled by default) for preventing files
+corruption that was caused by not synced and not locked filesystem. Filesystem
+lock lasts 10 seconds.
+
 Version 2011.09.27.1
 --------------------
 
