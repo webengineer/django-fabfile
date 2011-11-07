@@ -364,7 +364,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
             else:
                 cmd = (
                     'rsync -e "ssh -i .ssh/{key_file} -o '
-                    'StrictHostKeyChecking=no" -cahHAX --delete '
+                    'StrictHostKeyChecking=no" -ahHAX --delete '
                     '--exclude /root/.bash_history '
                     '--exclude /home/*/.bash_history '
                     '--exclude /etc/ssh/moduli --exclude /etc/ssh/ssh_host_* '
