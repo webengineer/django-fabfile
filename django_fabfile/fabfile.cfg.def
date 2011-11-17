@@ -38,6 +38,9 @@ USER_DATA=#!/bin/bash -ex
     sudo /etc/init.d/fail2ban restart
     sudo /etc/init.d/zabbix-agent restart
 
+[SYNC]
+username = 
+
 [purge_backups]
 HOURLY_BACKUPS = 24
 DAILY_BACKUPS = 7

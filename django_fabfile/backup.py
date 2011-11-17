@@ -11,7 +11,7 @@ from json import dumps
 
 from boto.exception import EC2ResponseError
 from dateutil.relativedelta import relativedelta
-from fabric.api import env, local, put, settings, sudo, task
+from fabric.api import env, local, put, settings, sudo, task, run
 from fabric.contrib.files import append
 
 from django_fabfile.instances import (attach_snapshot, create_temp_inst,
@@ -65,13 +65,13 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
 
     def freeze_volume():
         key_filename = config.get(inst.region.name, 'KEY_FILENAME')
+        try:
+            _user = config.get('SYNC', 'USERNAME')
+        except:
+            _user = username
         with settings(host_string=inst.public_dns_name,
-                      key_filename=key_filename):
-            sudo('mountpoint=`mount | grep "{0}" | cut -d " " -f 3`;'
-                 ' if [ "$mountpoint" != "" ]; then screen -d -m sh '
-                 '-c "sleep 10; xfs_freeze -u $mountpoint" && '
-                 'xfs_freeze -f $mountpoint; fi'
-                 .format(vol.attach_data.device), pty=False)
+                      key_filename=key_filename, user=_user):
+            run('for i in {1..20}; do sudo sync; sleep 1; done &')
 
     def initiate_snapshot():
         if consistent:
@@ -393,7 +393,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
             else:
                 cmd = (
                     'rsync -e "ssh -i .ssh/{key_file} -o '
-                    'StrictHostKeyChecking=no" -ahHAX --delete '
+                    'StrictHostKeyChecking=no" -cahHAX --delete '
                     '--exclude /root/.bash_history '
                     '--exclude /home/*/.bash_history '
                     '--exclude /etc/ssh/moduli --exclude /etc/ssh/ssh_host_* '
@@ -411,11 +411,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                 sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
             wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
                           '/root/.ssh/authorized_keys')
-            wait_for_sudo('mountpoint=`mount | grep "{0}" | cut -d " " -f 3`;'
-                 ' if [ "$mountpoint" != "" ]; then screen -d -m sh '
-                 '-c "sleep 10; xfs_freeze -u $mountpoint" && '
-                 'xfs_freeze -f $mountpoint; fi'
-                 .format(dst_vol), pty=False)
+            wait_for_sudo('for i in {1..20}; do sync; sleep 1; done &')
 
 
 def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
