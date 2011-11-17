@@ -44,7 +44,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
         tags to be added to snapshot. Will be cloned from volume by
         default.
     consistent
-        if consistent True, script will try to freeze fs mountpoint and create 
+        if consistent True, script will try to freeze fs mountpoint and create
         snapshot while it's freezed with all buffers dumped to disk.
     """
     if vol.attach_data:
@@ -75,7 +75,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
 
     def initiate_snapshot():
         if consistent:
-            if inst.state=='running':
+            if inst.state == 'running':
                 try:
                     freeze_volume()
                 except:
