@@ -71,6 +71,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
             _user = username
         with settings(host_string=inst.public_dns_name,
                       key_filename=key_filename, user=_user):
+            wait_for_sudo('sync', shell=False)
             run('for i in {1..20}; do sudo sync; sleep 1; done &')
 
     def initiate_snapshot():
@@ -393,7 +394,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
             else:
                 cmd = (
                     'rsync -e "ssh -i .ssh/{key_file} -o '
-                    'StrictHostKeyChecking=no" -cahHAX --delete '
+                    'StrictHostKeyChecking=no" -cahHAX --delete --inplace '
                     '--exclude /root/.bash_history '
                     '--exclude /home/*/.bash_history '
                     '--exclude /etc/ssh/moduli --exclude /etc/ssh/ssh_host_* '
@@ -411,6 +412,7 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                 sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
             wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
                           '/root/.ssh/authorized_keys')
+            wait_for_sudo('sync', shell=False)
             wait_for_sudo('for i in {1..20}; do sync; sleep 1; done &')
 
 
