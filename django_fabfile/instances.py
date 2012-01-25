@@ -11,7 +11,7 @@ from string import lowercase
 from time import sleep
 from traceback import format_exc
 
-from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType
+from boto.ec2.blockdevicemapping import BlockDeviceMapping, EBSBlockDeviceType, BlockDeviceType
 from boto.exception import BotoServerError
 from fabric.api import env, output, prompt, put, settings, sudo, task
 from fabric.context_managers import hide
@@ -656,6 +656,10 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
     ebs.delete_on_termination = True
     block_map = BlockDeviceMapping()
     block_map[_device] = ebs
+    sdb = BlockDeviceType()
+    sdb.ephemeral_name = 'ephemeral0'
+    block_map['/dev/sdb'] = sdb
+
     if snapshot:
         for s in snapshot:
             s_dev = get_snap_device(s)
