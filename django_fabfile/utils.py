@@ -52,29 +52,29 @@ class Config(object):
         self.fabfile.readfp(resource_stream(pkg_name, 'fabfile.cfg.def'))
         self.fabfile.read('fabfile.cfg')
 
-    def get_from_django(self, option, section='DEFAULT'):
+    def _get(self, getter, section, option):
         if os.environ.get('DJANGO_SETTINGS_MODULE'):
             try:
                 from django.conf import settings
                 return settings.FABFILE[section][option]
             except:
                 pass
+        if self.fabfile.has_section(section):
+            return getattr(self.fabfile, getter)(section, option)
+        else:
+            return getattr(self.fabfile, getter)('DEFAULT', option)
 
     def get(self, section, option):
-        return (self.get_from_django(option, section) or
-                self.fabfile.get(section, option))
+        return self._get('get', section, option)
 
     def getboolean(self, section, option):
-        return (self.get_from_django(option, section) or
-                self.fabfile.getboolean(section, option))
+        return self._get('getboolean', section, option)
 
     def getfloat(self, section, option):
-        return (self.get_from_django(option, section) or
-                self.fabfile.getfloat(section, option))
+        return self._get('getfloat', section, option)
 
     def getint(self, section, option):
-        return (self.get_from_django(option, section) or
-                self.fabfile.getint(section, option))
+        return self._get('getint', section, option)
 
     def get_creds(self):
         return dict(

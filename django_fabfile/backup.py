@@ -545,6 +545,8 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             return get_descr_attr(snap, 'Region') == region.name
         snaps = [snp for snp in snaps if is_native(snp, src_conn.region)]
 
+    if not snaps:
+        return
     with nested(create_temp_inst(src_conn.region),
                 create_temp_inst(dst_conn.region)) as (src_inst, dst_inst):
         snaps = sorted(snaps, key=get_snap_vol)    # Prepare for grouping.
@@ -561,3 +563,26 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
             except:
                 logger.exception('rsync of {1} from {0} to {2} failed'.format(
                     *args))
+
+
+@task
+def rsync_all_regions(primary_backup_region, secondary_backup_region):
+    """
+    Replicates snapshots across all regions.
+
+    Sync snapshots from all but primary regions into primary. And then
+    snapshots from primary regions will be replicated into secondary
+    backup region.
+
+    :param primary_backup_region: AWS region name that keeps all
+        snapshots clones;
+    :type primary_backup_region: str
+    :param secondary_backup_region: AWS region name that keeps clones of
+        snapshots from `primary_backup_region`.
+    :type secondary_backup_region: str
+    """
+    pri_name = get_region_conn(primary_backup_region).region.name
+    all_regs = get_region_conn().get_all_regions()
+    for reg in (reg for reg in all_regs if reg.name != pri_name):
+        rsync_region(reg.name, primary_backup_region)
+    rsync_region(primary_backup_region, secondary_backup_region)

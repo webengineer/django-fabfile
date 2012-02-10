@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.02.10.1
+--------------------
+
+Added :func:`django_fabfile.backup.rsync_all_regions` for replicating snapshots
+across all available regions.
+
 Version 2011.11.04.1
 --------------------
 

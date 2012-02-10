@@ -55,7 +55,7 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     """
     conn = get_region_conn(region_name)
 
-    ami_ptrn = config.get('DEFAULT', 'AMI_PTRN')
+    ami_ptrn = config.get(conn.region.name, 'AMI_PTRN')
     architecture = architecture or config.get('DEFAULT', 'ARCHITECTURE')
     ubuntu_aws_account = config.get('DEFAULT', 'UBUNTU_AWS_ACCOUNT')
     filters = {'owner_id': ubuntu_aws_account, 'architecture': architecture,
@@ -63,22 +63,23 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
              'root_device_type': 'ebs'}
     images = conn.get_all_images(filters=filters)
     # Filter AMI by latest version.
-    ptrn = re.compile(config.get('DEFAULT', 'AMI_REGEXP'))
+    ptrn = re.compile(config.get(conn.region.name, 'AMI_REGEXP'))
     versions = set([ptrn.search(img.name).group('version') for img in images])
 
     def complement(year_month):
         return '0' + year_month if len(year_month) == 4 else year_month
 
     latest_version = sorted(set(filter(complement, versions)))[-1]  # XXX Y3K.
-    ami_ptrn_with_version = config.get('DEFAULT', 'AMI_PTRN_WITH_VERSION')
+    ami_ptrn_with_version = config.get(
+        conn.region.name, 'AMI_PTRN_WITH_VERSION')
     name_with_version = ami_ptrn_with_version.format(version=latest_version)
     filters.update({'name': name_with_version})
     images = conn.get_all_images(filters=filters)
     # Filter AMI by latest release date.
     dates = set([ptrn.search(img.name).group('released_at') for img in images])
     latest_date = sorted(set(dates))[-1]
-    ami_ptrn_with_release_date = config.get('DEFAULT',
-                                            'AMI_PTRN_WITH_RELEASE_DATE')
+    ami_ptrn_with_release_date = config.get(
+        conn.region.name, 'AMI_PTRN_WITH_RELEASE_DATE')
     name_with_version_and_release = ami_ptrn_with_release_date.format(
         version=latest_version, released_at=latest_date)
     filters.update({'name': name_with_version_and_release})
