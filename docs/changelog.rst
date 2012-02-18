@@ -1,6 +1,18 @@
 Change Log
 **********
 
+Version 2012.02.18.1
+--------------------
+
+Added :func:`django_fabfile.backup.get_oldest_replica` for filtering
+snapshots without replicas with ordering by creation time.
+
+:mod:`django_fabfile.backup` expects to locate `TAG_NAME` and `TAG_VALUE`
+in the 'DEFAULT' section of `fabfile.cfg`.
+
+Added `force` option to :func:`django_fabfile.backup.rsync_snapshot` for
+enforcing old snapshots replication.
+
 Version 2012.02.10.1
 --------------------
 

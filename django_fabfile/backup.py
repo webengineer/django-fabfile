@@ -29,6 +29,12 @@ env.update({'user': username, 'disable_known_hosts': True})
 logger = logging.getLogger(__name__)
 
 
+DEFAULT_TAG_NAME = config.get('DEFAULT', 'TAG_NAME')
+DEFAULT_TAG_VALUE = config.get('DEFAULT', 'TAG_VALUE')
+DESCRIPTION_TAG = 'Description'
+SNAP_STATUSES = ['pending', 'completed']    # All but "error".
+
+
 def create_snapshot(vol, description='', tags=None, synchronously=True,
                     consistent=False):
     """Return new snapshot for the volume.
@@ -41,8 +47,8 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
         description for snapshot. Will be compiled from instnace
         parameters by default;
     tags
-        tags to be added to snapshot. Will be cloned from volume by
-        default.
+        tags to be added to snapshot. Will be cloned from volume and from
+        instance by default.
     consistent
         if consistent True, script will try to freeze fs mountpoint and create
         snapshot while it's freezed with all buffers dumped to disk.
@@ -89,7 +95,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
             add_tags(snapshot, vol.tags)
             if inst:
                 add_tags(snapshot, inst.tags)
-        logger.info('{0} initiated from {1}'.format(snapshot, vol))
+        logger.info('{0} started from {1} in {0.region}'.format(snapshot, vol))
         return snapshot
 
     if synchronously:
@@ -140,15 +146,15 @@ def backup_instance(region_name, instance_id=None, instance=None,
 
 
 @task
-def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
-                            synchronously=False, consistent=False):
+def backup_instances_by_tag(
+        region_name=None, tag_name=DEFAULT_TAG_NAME,
+        tag_value=DEFAULT_TAG_VALUE, synchronously=False, consistent=False):
     """Creates backup for all instances with given tag in region.
 
     region_name
         will be applied across all regions by default;
     tag_name, tag_value
-        will be fetched from config by default, may be configured
-        per region;
+        will be fetched from config by default;
     synchronously
         will be accomplished with assuring successful result. False by
         default;
@@ -165,8 +171,6 @@ def backup_instances_by_tag(region_name=None, tag_name=None, tag_value=None,
     else:
         regions = get_region_conn().get_all_regions()
     for reg in regions:
-        tag_name = tag_name or config.get(reg.name, 'TAG_NAME')
-        tag_value = tag_value or config.get(reg.name, 'TAG_VALUE')
         conn = get_region_conn(reg.name)
         filters = {'resource-type': 'instance', 'key': tag_name,
                    'tag-value': tag_value}
@@ -460,9 +464,53 @@ def create_empty_snapshot(region, size):
         return snap
 
 
+def get_relevant_snapshots(
+        conn, tag_name=DEFAULT_TAG_NAME, tag_value=DEFAULT_TAG_VALUE,
+        native_only=True, filters={'status': SNAP_STATUSES}):
+    """Returns snapshots with proper description."""
+    if tag_name and tag_value:
+        filters.update({'tag:{0}'.format(tag_name): tag_value})
+    snaps = conn.get_all_snapshots(owner='self', filters=filters)
+    is_described = lambda snap: get_snap_vol(snap) and get_snap_time(snap)
+    snaps = [snp for snp in snaps if is_described(snp)]
+    if native_only:
+        is_native = lambda snp, reg: get_descr_attr(snp, 'Region') == reg.name
+        snaps = [snp for snp in snaps if is_native(snp, conn.region)]
+    return snaps
+
+
+def get_oldest_replica(
+        src_conn, dst_conn, amount=1, native_only=True,
+        tag_name=DEFAULT_TAG_NAME, tag_value=DEFAULT_TAG_VALUE):
+    """Return list with (one by default) not yet replicated snapshots."""
+    snaps = get_relevant_snapshots(src_conn, tag_name, tag_value, native_only)
+    if not snaps:
+        return []
+    # Separating out all but latest snapshots for every volume.
+    latest_snaps = []
+    snaps = sorted(snaps, key=get_snap_vol)
+    for vol_id, vol_snaps in groupby(snaps, key=get_snap_vol):
+        latest_snaps.append(sorted(vol_snaps, key=get_snap_time)[-1])
+    # Seeking for latests replicas in dst region for every new snapshot.
+    # Treating volumes with proper description as replicas.
+    latest_descriptions = [snp.description for snp in latest_snaps]
+    # Replicated snapshots.
+    snap_desc = [snp.description for snp in dst_conn.get_all_snapshots(
+        owner='self', filters={'status': SNAP_STATUSES,
+                               'description': latest_descriptions})]
+    # Temporary volumes used by in-process replication.
+    vol_desc = [vol.tags[DESCRIPTION_TAG] for vol in dst_conn.get_all_volumes(
+        filters={'tag:{0}'.format(DESCRIPTION_TAG): latest_descriptions,
+                 'status': ['creating', 'available', 'in-use']})]
+    # Seeking for snaps wihtout replicas.
+    snaps_to_replicate = [snp for snp in latest_snaps if
+        snp.description not in set(snap_desc + vol_desc)]
+    return sorted(snaps_to_replicate, key=get_snap_time)[:amount]
+
+
 @task
 def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
-                   src_inst=None, dst_inst=None):
+                   src_inst=None, dst_inst=None, force=False):
 
     """Duplicate the snapshot into dst_region.
 
@@ -473,7 +521,9 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     snapshot_id
         snapshot to duplicate;
     src_inst, dst_inst
-        will be used instead of creating new for temporary.
+        will be used instead of creating new for temporary;
+    force
+        rsync snapshot even if newer version exist.
 
     You'll need to open port 60000 for encrypted instances replication."""
     src_conn = get_region_conn(src_region_name)
@@ -501,7 +551,7 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
 
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
-        if get_snap_time(dst_snap) >= get_snap_time(src_snap):
+        if not force and get_snap_time(dst_snap) >= get_snap_time(src_snap):
             kwargs = dict(src=src_snap, dst=dst_snap, dst_reg=dst_conn.region)
             logger.info('Stepping over {src} - it\'s not newer than {dst} '
                         '{dst.description} in {dst_reg}'.format(**kwargs))
@@ -512,13 +562,16 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     with nested(attach_snapshot(src_snap, inst=src_inst, encr=encr),
                 attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
                 (src_vol, src_mnt), (dst_vol, dst_mnt)):
+        # Copy snapshot desctiption into temporary volume's tag.
+        dst_vol.add_tag(DESCRIPTION_TAG, src_snap.description)
         update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr,
                     delete_old=not vol_snaps)  # Delete only empty snapshots.
 
 
 @task
-def rsync_region(src_region_name, dst_region_name, tag_name=None,
-                 tag_value=None, native_only=True):
+def rsync_region(
+        src_region_name, dst_region_name, tag_name=DEFAULT_TAG_NAME,
+        tag_value=DEFAULT_TAG_VALUE, native_only=True):
     """Duplicates latest snapshots with given tag into dst_region.
 
     src_region_name, dst_region_name
@@ -526,25 +579,13 @@ def rsync_region(src_region_name, dst_region_name, tag_name=None,
         to the dst_region;
     tag_name, tag_value
         snapshots will be filtered by tag. Tag will be fetched from
-        config by default, may be configured per region;
+        config by default;
     native_only
         sync only snapshots, created in the src_region_name. True by
         default."""
     src_conn = get_region_conn(src_region_name)
     dst_conn = get_region_conn(dst_region_name)
-    tag_name = tag_name or config.get(src_conn.region.name, 'TAG_NAME')
-    tag_value = tag_value or config.get(src_conn.region.name, 'TAG_VALUE')
-    filters = {'tag-key': tag_name, 'tag-value': tag_value}
-    snaps = src_conn.get_all_snapshots(owner='self', filters=filters)
-    snaps = [snp for snp in snaps if not snp.status == 'error']
-    _is_described = lambda snap: get_snap_vol(snap) and get_snap_time(snap)
-    snaps = [snp for snp in snaps if _is_described(snp)]
-    if native_only:
-
-        def is_native(snap, region):
-            return get_descr_attr(snap, 'Region') == region.name
-        snaps = [snp for snp in snaps if is_native(snp, src_conn.region)]
-
+    snaps = get_relevant_snapshots(src_conn, tag_name, tag_value, native_only)
     if not snaps:
         return
     with nested(create_temp_inst(src_conn.region),
