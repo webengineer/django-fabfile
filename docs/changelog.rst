@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.02.19.1
+--------------------
+
+Preventing snapshot replication if it's already in process of
+replication.
+
 Version 2012.02.18.1
 --------------------
 

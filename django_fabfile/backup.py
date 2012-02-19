@@ -33,6 +33,7 @@ DEFAULT_TAG_NAME = config.get('DEFAULT', 'TAG_NAME')
 DEFAULT_TAG_VALUE = config.get('DEFAULT', 'TAG_VALUE')
 DESCRIPTION_TAG = 'Description'
 SNAP_STATUSES = ['pending', 'completed']    # All but "error".
+VOL_STATUSES = ['creating', 'available', 'in-use']
 
 
 def create_snapshot(vol, description='', tags=None, synchronously=True,
@@ -501,7 +502,7 @@ def get_oldest_replica(
     # Temporary volumes used by in-process replication.
     vol_desc = [vol.tags[DESCRIPTION_TAG] for vol in dst_conn.get_all_volumes(
         filters={'tag:{0}'.format(DESCRIPTION_TAG): latest_descriptions,
-                 'status': ['creating', 'available', 'in-use']})]
+                 'status': VOL_STATUSES})]
     # Seeking for snaps wihtout replicas.
     snaps_to_replicate = [snp for snp in latest_snaps if
         snp.description not in set(snap_desc + vol_desc)]
@@ -544,11 +545,18 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     logger.info(info.format(snap=src_snap, dst=dst_conn.region,
                             name=src_snap.tags.get('Name')))
 
-    dst_snaps = dst_conn.get_all_snapshots(owner='self')
-    dst_snaps = [snp for snp in dst_snaps if not snp.status == 'error']
     src_vol = get_snap_vol(src_snap)
-    vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
-
+    vol_snaps = get_relevant_snapshots(dst_conn, filters={
+        'status': SNAP_STATUSES, 'volume-id': src_vol})
+    if not force:
+        tmp_vol = dst_conn.get_all_volumes(     # Indicates running replication.
+            filters={'tag:{0}'.format(DESCRIPTION_TAG): src_snap.description,
+                     'status': VOL_STATUSES})
+        if tmp_vol:
+            logger.info('Stepping over {src} - it\'s already replicating to '
+                        '{vol} in {reg}'.format(src=src_snap, vol=tmp_vol,
+                                                reg=dst_conn.region))
+            return
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
         if not force and get_snap_time(dst_snap) >= get_snap_time(src_snap):
