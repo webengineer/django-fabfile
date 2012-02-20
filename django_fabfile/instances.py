@@ -99,7 +99,7 @@ def create_temp_inst(region=None, zone=None, key_pair=None, security_groups='',
     def create_inst_in_zone(zone, key_pair, sec_grps):
         inst = create_instance(zone.region.name, zone.name, key_pair=key_pair,
                                security_groups=sec_grps)
-        inst.add_tag(config.get(zone.region.name, 'TAG_NAME'), 'temporary')
+        inst.add_tag(config.get('DEFAULT', 'TAG_NAME'), 'temporary')
         return inst
 
     if zone:
@@ -205,7 +205,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             vol = inst.connection.create_volume(snap.volume_size,
                                                 inst.placement, snap)
             add_tags(vol, snap.tags)
-            vol.add_tag(config.get(inst.region.name, 'TAG_NAME'), 'temporary')
+            vol.add_tag(config.get('DEFAULT', 'TAG_NAME'), 'temporary')
             volumes_to_delete.append(vol)
             dev_name = get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
@@ -515,8 +515,8 @@ def modify_instance_termination(region, instance_id):
     before terminating production instance via API."""
     conn = get_region_conn(region)
     inst = get_inst_by_id(conn.region.name, instance_id)
-    prod_tag = config.get(conn.region.name, 'TAG_NAME')
-    prod_val = config.get(conn.region.name, 'TAG_VALUE')
+    prod_tag = config.get('DEFAULT', 'TAG_NAME')
+    prod_val = config.get('DEFAULT', 'TAG_VALUE')
     inst_tag_val = inst.tags.get(prod_tag)
     inst.modify_attribute('disableApiTermination', inst_tag_val == prod_val)
 
