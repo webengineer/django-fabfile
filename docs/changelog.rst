@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2012.02.20.1
+--------------------
+
+Fixed replication of existing snapshots that led to non-incremental snapshots.
+
 Version 2012.02.19.1
 --------------------
 

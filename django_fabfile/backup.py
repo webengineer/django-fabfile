@@ -546,8 +546,9 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                             name=src_snap.tags.get('Name')))
 
     src_vol = get_snap_vol(src_snap)
-    vol_snaps = get_relevant_snapshots(dst_conn, filters={
-        'status': SNAP_STATUSES, 'volume-id': src_vol})
+    dst_snaps = get_relevant_snapshots(dst_conn,
+                                       filters={'status': SNAP_STATUSES})
+    vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
     if not force:
         tmp_vol = dst_conn.get_all_volumes(     # Indicates running replication.
             filters={'tag:{0}'.format(DESCRIPTION_TAG): src_snap.description,
