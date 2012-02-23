@@ -196,7 +196,8 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
     newly created temporary instance for `key_pair` and with
     `security_groups`."""
 
-    wait_for(snap, '100%', limit=10 * 60)
+    wait_for(snap, '100%', limit=60 * 60)
+    assert snap.status == 'completed'
 
     def force_snap_attach(inst, snap):
         """Iterate over devices until successful attachment."""
@@ -243,7 +244,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
-                wait_for(vol, 'available')
+                wait_for(vol, 'available', limit=10 * 60)
                 logger.info('Deleting {vol} in {vol.region}.'.format(vol=vol))
                 vol.delete()
 
@@ -594,7 +595,7 @@ def launch_instance_from_ami(
         instance_type=inst_type,
         user_data=user_data,
         placement=zone_name).instances[0]
-    wait_for(inst, 'running')
+    wait_for(inst, 'running', limit=10 * 60)
     groups = [grp.name for grp in inst.groups]
     inst.add_tag('Security Groups', dumps(groups, separators=(',', ':')))
     add_tags(inst, image.tags)

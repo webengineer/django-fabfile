@@ -107,11 +107,13 @@ def get_region_conn(region_name=None):
 
 class StateNotChangedError(Exception):
 
-    def __init__(self, state):
+    def __init__(self, obj, state):
+        self.obj = obj
         self.state = state
 
     def __str__(self):
-        return 'State remain {0} after limited time gone'.format(self.state)
+        return '{0} state remain {1} after limited time gone'.format(
+            self.obj, self.state)
 
 
 def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
@@ -157,7 +159,7 @@ def wait_for(obj, state, attrs=None, max_sleep=30, limit=5 * 60):
         if obj_state == state:
             logger.info('done.')
         else:
-            raise StateNotChangedError(obj_state)
+            raise StateNotChangedError(obj, obj_state)
 
 
 class WaitForProper(object):

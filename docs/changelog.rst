@@ -1,6 +1,20 @@
 Change Log
 **********
 
+Version 2012.02.23.1
+--------------------
+
+Increased new instance launch awaiting time in
+:func:`django_fabfile.instances.launch_instance_from_ami` and
+temporary volume availability awaiting time before deleting in
+:func:`django_fabfile.instances.attach_snapshot`.
+
+Version 2012.02.23.1
+--------------------
+
+Increased snapshot awaiting time in
+:func:`django_fabfile.instances.attach_snapshot`.
+
 Version 2012.02.20.1
 --------------------
 
