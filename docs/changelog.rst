@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.02.26.1
+--------------------
+
+Added explicit exception for preventing `generator didn't yield`
+`RuntimeError`.
+
 Version 2012.02.23.1
 --------------------
 

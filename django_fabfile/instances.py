@@ -140,6 +140,10 @@ def get_avail_dev_encr(instance):
     return '/dev/sd{0}'.format(chars[1])
 
 
+class NoDevFoundError(Exception):
+    pass
+
+
 def get_vol_dev(vol):
     """Return OS-specific volume representation as attached device."""
     assert vol.attach_data.instance_id
@@ -148,11 +152,16 @@ def get_vol_dev(vol):
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     attached_dev = vol.attach_data.device
     natty_dev = attached_dev.replace('sd', 'xvd')
+    representations = [attached_dev, natty_dev]
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
         logger.debug(env, output)
-        for dev in [attached_dev, natty_dev]:
+        for dev in representations:
             if wait_for_exists(dev):
                 return dev
+        raise NoDevFoundError(
+            'No one from {variants} found at {host} for {vol} with '
+            '{vol.attach_data.__dict__}'.format(host=inst, vol=vol,
+                                                variants=representations))
 
 
 def mount_volume(vol, mkfs=False):
@@ -162,8 +171,7 @@ def mount_volume(vol, mkfs=False):
     vol
         volume to be mounted on the instance it is attached to."""
 
-    vol.update()
-    assert vol.attach_data.device
+    wait_for(vol, 'in-use')
     inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
@@ -212,7 +220,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
             vol.attach(inst.id, dev_name)
             try:
-                wait_for(vol, 'attached', ['attach_data', 'status'], limit=60)
+                wait_for(vol, 'in-use')
             except StateNotChangedError:
                 logger.error('Attempt to attach as next device')
             else:
@@ -232,6 +240,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             yield vol, mnt
         except BaseException as err:
             logger.exception(str(err))
+            raise
         finally:
             key_filename = config.get(inst.region.name, 'KEY_FILENAME')
             with settings(host_string=inst.public_dns_name,

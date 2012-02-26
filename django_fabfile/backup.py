@@ -128,9 +128,10 @@ def backup_instance(region_name, instance_id=None, instance=None,
     instance, instance_id
         either `instance_id` or `instance` argument should be specified;
     synchronously
-        wait for completion. False by default.
+        wait for successful completion. False by default.
     consistent
         if True, then FS mountpoint will be frozen before snapshotting.
+        False by default.
     """
     assert bool(instance_id) ^ bool(instance), ('Either instance_id or '
         'instance should be specified')
