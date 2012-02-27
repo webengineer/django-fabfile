@@ -159,7 +159,7 @@ def get_vol_dev(vol):
             if wait_for_exists(dev):
                 return dev
         raise NoDevFoundError(
-            'No one from {variants} found at {host} for {vol} with '
+            'Nothing from {variants} was located at {host} for {vol} with '
             '{vol.attach_data.__dict__}'.format(host=inst, vol=vol,
                                                 variants=representations))
 
@@ -172,6 +172,7 @@ def mount_volume(vol, mkfs=False):
         volume to be mounted on the instance it is attached to."""
 
     wait_for(vol, 'in-use')
+    wait_for(vol, 'attached', ['attach_data', 'status'])
     inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
     with settings(host_string=inst.public_dns_name, key_filename=key_filename):
@@ -220,7 +221,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
             vol.attach(inst.id, dev_name)
             try:
-                wait_for(vol, 'in-use')
+                wait_for(vol, 'attached', ['attach_data', 'status'])
             except StateNotChangedError:
                 logger.error('Attempt to attach as next device')
             else:

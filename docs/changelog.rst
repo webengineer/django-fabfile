@@ -1,6 +1,13 @@
 Change Log
 **********
 
+Version 2012.02.27.1
+--------------------
+
+Fixed locating of volume when it not yet attached in
+:func:`django_fabfile.instances.get_vol_dev` used by
+:func:`django_fabfile.backup.rsync_snapshot`.
+
 Version 2012.02.26.1
 --------------------
 
