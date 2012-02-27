@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.02.27.2
+--------------------
+
+Removed unnecessary temporary snapshot creation during
+:func:`django_fabfile.backup.rsync_snapshot`.
+
 Version 2012.02.27.1
 --------------------
 

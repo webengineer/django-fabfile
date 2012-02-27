@@ -1,6 +1,7 @@
 """Check :doc:`README` or :class:`django_fabfile.utils.Config` docstring
 for setup instructions."""
 
+from contextlib import contextmanager
 import logging
 import os
 import re
@@ -436,34 +437,32 @@ def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
                               dst_vol.attach_data.instance_id)
     rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                      encr)
-    if dst_vol.snapshot_id:
-        old_snap = dst_vol.connection.get_all_snapshots(
-            [dst_vol.snapshot_id])[0]
-    else:
-        old_snap = None
     src_snap = src_vol.connection.get_all_snapshots([src_vol.snapshot_id])[0]
     create_snapshot(dst_vol, description=src_snap.description,
                                     tags=src_snap.tags, synchronously=False)
-    if old_snap and delete_old:
+    if delete_old and dst_vol.snapshot_id:
+        old_snap = dst_vol.connection.get_all_snapshots(
+            [dst_vol.snapshot_id])[0]
         logger.info('Deleting previous {0} in {1}'.format(old_snap,
                                                           dst_vol.region))
         old_snap.delete()
 
 
-def create_empty_snapshot(region, size):
+@contextmanager
+def create_tmp_volume(region, size):
     """Format new filesystem."""
     with create_temp_inst(region) as inst:
-        vol = get_region_conn(region.name).create_volume(size, inst.placement)
         earmarking_tag = config.get(region.name, 'TAG_NAME')
-        vol.add_tag(earmarking_tag, 'temporary')
-        vol.attach(inst.id, get_avail_dev(inst))
-        mount_volume(vol, mkfs=True)
-        snap = vol.create_snapshot()
-        snap.add_tag(earmarking_tag, 'temporary')
-        vol.detach(True)
-        wait_for(vol, 'available')
-        vol.delete()
-        return snap
+        try:
+            vol = get_region_conn(region.name).create_volume(size,
+                                                             inst.placement)
+            vol.add_tag(earmarking_tag, 'temporary')
+            vol.attach(inst.id, get_avail_dev(inst))
+            yield vol, mount_volume(vol, mkfs=True)
+        finally:
+            vol.detach(True)
+            wait_for(vol, 'available')
+            vol.delete()
 
 
 def get_relevant_snapshots(
@@ -558,6 +557,12 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                         '{vol} in {reg}'.format(src=src_snap, vol=tmp_vol,
                                                 reg=dst_conn.region))
             return
+
+    def sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt):
+        # Marking temporary volume with snapshot's description.
+        dst_vol.add_tag(DESCRIPTION_TAG, src_snap.description)
+        update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr)
+
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
         if not force and get_snap_time(dst_snap) >= get_snap_time(src_snap):
@@ -565,16 +570,18 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
             logger.info('Stepping over {src} - it\'s not newer than {dst} '
                         '{dst.description} in {dst_reg}'.format(**kwargs))
             return
+        else:
+            with nested(
+                    attach_snapshot(src_snap, inst=src_inst, encr=encr),
+                    attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
+                        (src_vol, src_mnt), (dst_vol, dst_mnt)):
+                sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt)
     else:
-        dst_snap = create_empty_snapshot(dst_conn.region, src_snap.volume_size)
-
-    with nested(attach_snapshot(src_snap, inst=src_inst, encr=encr),
-                attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
-                (src_vol, src_mnt), (dst_vol, dst_mnt)):
-        # Copy snapshot desctiption into temporary volume's tag.
-        dst_vol.add_tag(DESCRIPTION_TAG, src_snap.description)
-        update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr,
-                    delete_old=not vol_snaps)  # Delete only empty snapshots.
+        with nested(
+                attach_snapshot(src_snap, inst=src_inst, encr=encr),
+                create_tmp_volume(dst_conn.region, src_snap.volume_size)) as (
+                    (src_vol, src_mnt), (dst_vol, dst_mnt)):
+            sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt)
 
 
 @task
