@@ -26,10 +26,14 @@ from django_fabfile.utils import (
 
 
 config = Config()
-username = config.get('DEFAULT', 'USERNAME')
-env.update({'user': username, 'disable_known_hosts': True})
+USERNAME = config.get('DEFAULT', 'USERNAME')
+env.update({'user': USERNAME, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
+
+
+DETACH_TIME = config.getint('DEFAULT', 'MINUTES_FOR_DETACH') * 60
+SNAP_TIME = config.getint('DEFAULT', 'MINUTES_FOR_SNAP') * 60
 
 
 @task
@@ -171,7 +175,6 @@ def mount_volume(vol, mkfs=False):
     vol
         volume to be mounted on the instance it is attached to."""
 
-    wait_for(vol, 'in-use')
     wait_for(vol, 'attached', ['attach_data', 'status'])
     inst = get_inst_by_id(vol.region.name, vol.attach_data.instance_id)
     key_filename = config.get(vol.region.name, 'KEY_FILENAME')
@@ -205,7 +208,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
     newly created temporary instance for `key_pair` and with
     `security_groups`."""
 
-    wait_for(snap, '100%', limit=60 * 60)
+    wait_for(snap, '100%', limit=SNAP_TIME)
     assert snap.status == 'completed'
 
     def force_snap_attach(inst, snap):
@@ -254,7 +257,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             for vol in volumes:
                 if vol.status != 'available':
                     vol.detach(force=True)
-                wait_for(vol, 'available', limit=10 * 60)
+                wait_for(vol, 'available', limit=DETACH_TIME)
                 logger.info('Deleting {vol} in {vol.region}.'.format(vol=vol))
                 vol.delete()
 
@@ -685,7 +688,7 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
     name = name.replace(":", ".").replace(" ", "_")
 
     # create the new AMI all options from snap JSON description:
-    wait_for(snap, '100%', limit=10 * 60)
+    wait_for(snap, '100%', limit=SNAP_TIME)
     result = conn.register_image(
         name=name,
         description=snap.description,
@@ -766,9 +769,9 @@ def create_encrypted_instance(
                 'Time': timestamp(),
             })
             snap = vol.create_snapshot(description)
-            wait_for(snap, '100%', limit=20 * 60)
+            wait_for(snap, '100%', limit=SNAP_TIME)
             vol.detach(force=True)
-            wait_for(vol, 'available')
+            wait_for(vol, 'available', limit=DETACH_TIME)
             vol.delete()
             HTTPS_SG = config.get('DEFAULT', 'HTTPS_SECURITY_GROUP')
             security_groups = ';'.join([security_groups, HTTPS_SG])

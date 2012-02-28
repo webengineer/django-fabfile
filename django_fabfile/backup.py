@@ -24,8 +24,8 @@ from django_fabfile.utils import (
 
 
 config = Config()
-username = config.get('DEFAULT', 'USERNAME')
-env.update({'user': username, 'disable_known_hosts': True})
+USERNAME = config.get('DEFAULT', 'USERNAME')
+env.update({'user': USERNAME, 'disable_known_hosts': True})
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ DEFAULT_TAG_VALUE = config.get('DEFAULT', 'TAG_VALUE')
 DESCRIPTION_TAG = 'Description'
 SNAP_STATUSES = ['pending', 'completed']    # All but "error".
 VOL_STATUSES = ['creating', 'available', 'in-use']
+DETACH_TIME = config.getint('DEFAULT', 'MINUTES_FOR_DETACH') * 60
+SNAP_TIME = config.getint('DEFAULT', 'MINUTES_FOR_SNAP') * 60
 
 
 def create_snapshot(vol, description='', tags=None, synchronously=True,
@@ -76,7 +78,7 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
         try:
             _user = config.get('SYNC', 'USERNAME')
         except:
-            _user = username
+            _user = USERNAME
         with settings(host_string=inst.public_dns_name,
                       key_filename=key_filename, user=_user):
             wait_for_sudo('sync', shell=False)
@@ -101,11 +103,10 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
         return snapshot
 
     if synchronously:
-        timeout = config.getint('DEFAULT', 'MINUTES_FOR_SNAP')
         while True:     # Iterate unless success and delete failed snapshots.
             snapshot = initiate_snapshot()
             try:
-                wait_for(snapshot, '100%', limit=timeout * 60)
+                wait_for(snapshot, '100%', limit=SNAP_TIME)
                 assert snapshot.status == 'completed', (
                     'completed with wrong status {0}'.format(snapshot.status))
             except (StateNotChangedError, AssertionError) as err:
@@ -460,8 +461,8 @@ def create_tmp_volume(region, size):
             vol.attach(inst.id, get_avail_dev(inst))
             yield vol, mount_volume(vol, mkfs=True)
         finally:
-            vol.detach(True)
-            wait_for(vol, 'available')
+            vol.detach(force=True)
+            wait_for(vol, 'available', limit=DETACH_TIME)
             vol.delete()
 
 

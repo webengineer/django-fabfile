@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2012.02.28.1
+--------------------
+
+Increased volume detach timeout.
+
 Version 2012.02.27.2
 --------------------
 
