@@ -1,6 +1,16 @@
 Change Log
 **********
 
+Version 2012.03.03.1
+--------------------
+
+Updated check for existing replication process. Removed comparison with
+snapshots in destination region by snapshot.start_time, only existing or
+in-process replica of the snapshot interrupts replication (newer
+snapshot in destination region were interrupted replication in earlier
+versions). Replication collision raised as exception now (returned
+nothing before).
+
 Version 2012.02.28.1
 --------------------
 

@@ -11,7 +11,9 @@ from itertools import groupby
 from json import dumps
 
 from boto.exception import EC2ResponseError
+from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
+from dateutil.tz import tzutc
 from fabric.api import env, local, put, settings, sudo, task, run
 from fabric.contrib.files import append
 
@@ -37,6 +39,11 @@ SNAP_STATUSES = ['pending', 'completed']    # All but "error".
 VOL_STATUSES = ['creating', 'available', 'in-use']
 DETACH_TIME = config.getint('DEFAULT', 'MINUTES_FOR_DETACH') * 60
 SNAP_TIME = config.getint('DEFAULT', 'MINUTES_FOR_SNAP') * 60
+REPLICATION_SPEED = config.getfloat('DEFAULT', 'REPLICATION_SPEED')
+
+
+class ReplicationCollisionError(Exception):
+    pass
 
 
 def create_snapshot(vol, description='', tags=None, synchronously=True,
@@ -481,6 +488,17 @@ def get_relevant_snapshots(
     return snaps
 
 
+def get_replicas(descriptions, dst_conn):
+    snaps = [snp for snp in dst_conn.get_all_snapshots(
+        owner='self', filters={'status': SNAP_STATUSES,
+                               'description': descriptions})]
+    # Temporary volumes used by in-process replication.
+    vols = [vol for vol in dst_conn.get_all_volumes(filters={
+        'tag:{0}'.format(DESCRIPTION_TAG): descriptions,
+        'status': VOL_STATUSES})]
+    return snaps, vols
+
+
 def get_oldest_replica(
         src_conn, dst_conn, amount=1, native_only=True,
         tag_name=DEFAULT_TAG_NAME, tag_value=DEFAULT_TAG_VALUE):
@@ -494,16 +512,10 @@ def get_oldest_replica(
     for vol_id, vol_snaps in groupby(snaps, key=get_snap_vol):
         latest_snaps.append(sorted(vol_snaps, key=get_snap_time)[-1])
     # Seeking for latests replicas in dst region for every new snapshot.
-    # Treating volumes with proper description as replicas.
     latest_descriptions = [snp.description for snp in latest_snaps]
-    # Replicated snapshots.
-    snap_desc = [snp.description for snp in dst_conn.get_all_snapshots(
-        owner='self', filters={'status': SNAP_STATUSES,
-                               'description': latest_descriptions})]
-    # Temporary volumes used by in-process replication.
-    vol_desc = [vol.tags[DESCRIPTION_TAG] for vol in dst_conn.get_all_volumes(
-        filters={'tag:{0}'.format(DESCRIPTION_TAG): latest_descriptions,
-                 'status': VOL_STATUSES})]
+    dst_snaps, dst_vols = get_replicas(latest_descriptions, dst_conn)
+    snap_desc = [snp.description for snp in dst_snaps]
+    vol_desc = [vol.tags[DESCRIPTION_TAG] for vol in dst_vols]
     # Seeking for snaps wihtout replicas.
     snaps_to_replicate = [snp for snp in latest_snaps if
         snp.description not in set(snap_desc + vol_desc)]
@@ -549,40 +561,47 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
     src_vol = get_snap_vol(src_snap)
     dst_snaps = get_relevant_snapshots(dst_conn, native_only=False)
     vol_snaps = [snp for snp in dst_snaps if get_snap_vol(snp) == src_vol]
-    if not force:
-        tmp_vol = dst_conn.get_all_volumes(     # Indicates running replication.
-            filters={'tag:{0}'.format(DESCRIPTION_TAG): src_snap.description,
-                     'status': VOL_STATUSES})
-        if tmp_vol:
-            logger.info('Stepping over {src} - it\'s already replicating to '
-                        '{vol} in {reg}'.format(src=src_snap, vol=tmp_vol,
-                                                reg=dst_conn.region))
-            return
 
-    def sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt):
+    def sync_mountpoints(src_snap, src_vol, src_mnt, dst_vol, dst_mnt):
         # Marking temporary volume with snapshot's description.
         dst_vol.add_tag(DESCRIPTION_TAG, src_snap.description)
+        snaps, vols = get_replicas(src_snap.description, dst_vol.connection)
+        if not force and snaps:
+            raise ReplicationCollisionError(
+                'Stepping over {snap} - it\'s already replicated as {snaps} '
+                'in {snaps[0].region}'.format(snap=src_snap, snaps=snaps))
+        if not force and len(vols) > 1:
+            timeout = src_snap.volume_size / REPLICATION_SPEED
+            duplicate_vols = [vol for vol in vols if not vol.id == dst_vol.id]
+            get_vol_time = lambda vol: parse(vol.create_time)
+            latest = sorted(duplicate_vols, key=get_vol_time)[-1]
+            age = (datetime.utcnow().replace(tzinfo=tzutc()) -
+                   get_vol_time(latest))
+            if age.days * 24 * 60 * 60 + age.seconds > timeout:
+                logger.warn(
+                    'Replication to temporary {vol} created during {snap} '
+                    'replication to {vol.region} qualified as hunged up. '
+                    'Starting new replication process.'.format(snap=src_snap,
+                                                               vol=latest))
+            else:
+                raise ReplicationCollisionError(
+                    'Stepping over {snap} - it\'s already replicating to '
+                    '{vol} in {vol.region}'.format(snap=src_snap, vol=latest))
         update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr)
 
     if vol_snaps:
         dst_snap = sorted(vol_snaps, key=get_snap_time)[-1]
-        if not force and get_snap_time(dst_snap) >= get_snap_time(src_snap):
-            kwargs = dict(src=src_snap, dst=dst_snap, dst_reg=dst_conn.region)
-            logger.info('Stepping over {src} - it\'s not newer than {dst} '
-                        '{dst.description} in {dst_reg}'.format(**kwargs))
-            return
-        else:
-            with nested(
-                    attach_snapshot(src_snap, inst=src_inst, encr=encr),
-                    attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
-                        (src_vol, src_mnt), (dst_vol, dst_mnt)):
-                sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt)
+        with nested(
+                attach_snapshot(src_snap, inst=src_inst, encr=encr),
+                attach_snapshot(dst_snap, inst=dst_inst, encr=encr)) as (
+                    (src_vol, src_mnt), (dst_vol, dst_mnt)):
+            sync_mountpoints(src_snap, src_vol, src_mnt, dst_vol, dst_mnt)
     else:
         with nested(
                 attach_snapshot(src_snap, inst=src_inst, encr=encr),
                 create_tmp_volume(dst_conn.region, src_snap.volume_size)) as (
                     (src_vol, src_mnt), (dst_vol, dst_mnt)):
-            sync_mountpoints(src_vol, src_mnt, dst_vol, dst_mnt)
+            sync_mountpoints(src_snap, src_vol, src_mnt, dst_vol, dst_mnt)
 
 
 @task

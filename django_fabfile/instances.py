@@ -163,9 +163,9 @@ def get_vol_dev(vol):
             if wait_for_exists(dev):
                 return dev
         raise NoDevFoundError(
-            'Nothing from {variants} was located at {host} for {vol} with '
-            '{vol.attach_data.__dict__}'.format(host=inst, vol=vol,
-                                                variants=representations))
+            'Nothing from {variants} was located at {host.state} {host} for '
+            '{vol} with {vol.attach_data.__dict__}'.format(
+                host=inst, vol=vol, variants=representations))
 
 
 def mount_volume(vol, mkfs=False):

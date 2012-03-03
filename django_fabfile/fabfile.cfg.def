@@ -13,6 +13,9 @@ MINUTES_FOR_DETACH = 15
 HTTPS_SECURITY_GROUP = https-access
 SSH_TIMEOUT_ATTEMPTS = 30
 SSH_TIMEOUT_INTERVAL = 30
+# GiB per second, used for qualifying replications hunged up in other
+# processes. Replication process includes snapshot creation.
+REPLICATION_SPEED = 0.007
 TAG_NAME = Earmarking
 TAG_VALUE = production
 UBUNTU_AWS_ACCOUNT = 099720109477
