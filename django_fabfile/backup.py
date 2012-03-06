@@ -572,21 +572,28 @@ def rsync_snapshot(src_region_name, snapshot_id, dst_region_name,
                 'in {snaps[0].region}'.format(snap=src_snap, snaps=snaps))
         if not force and len(vols) > 1:
             timeout = src_snap.volume_size / REPLICATION_SPEED
-            duplicate_vols = [vol for vol in vols if not vol.id == dst_vol.id]
             get_vol_time = lambda vol: parse(vol.create_time)
-            latest = sorted(duplicate_vols, key=get_vol_time)[-1]
-            age = (datetime.utcnow().replace(tzinfo=tzutc()) -
-                   get_vol_time(latest))
-            if age.days * 24 * 60 * 60 + age.seconds > timeout:
+
+            def not_outdated(vol, now):
+                age = now - get_vol_time(vol)
+                return age.days * 24 * 60 * 60 + age.seconds < timeout
+
+            now = datetime.utcnow().replace(tzinfo=tzutc())
+            actual_vols = [vol for vol in vols if not_outdated(vol, now)]
+            hunged_vols = set(vols) - set(actual_vols)
+            if len(actual_vols) > 1:
+                oldest = sorted(actual_vols, key=get_vol_time)[0]
+                if dst_vol.id != oldest.id:
+                    raise ReplicationCollisionError(
+                        'Stepping over {snap} - it\'s already replicating to '
+                        '{vol} in {vol.region}'.format(snap=src_snap,
+                                                       vol=oldest))
+            if len(hunged_vols) > 1:
                 logger.warn(
-                    'Replication to temporary {vol} created during {snap} '
-                    'replication to {vol.region} qualified as hunged up. '
-                    'Starting new replication process.'.format(snap=src_snap,
-                                                               vol=latest))
-            else:
-                raise ReplicationCollisionError(
-                    'Stepping over {snap} - it\'s already replicating to '
-                    '{vol} in {vol.region}'.format(snap=src_snap, vol=latest))
+                    'Replication to temporary {vols} created during '
+                    'transmitting {snap} to {reg} qualified as hunged up. '
+                    'Starting new replication process.'.format(
+                        snap=src_snap, vols=hunged_vols, reg=dst_vol.region))
         update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr)
 
     if vol_snaps:
