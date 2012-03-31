@@ -48,7 +48,7 @@ def create_instance(
     region_name
         by default will be created in the us-east-1 region;
     zone_name
-        string-formatted name. By default will be used latest zone;
+        string-formatted name, may be omitted;
     key_pair
         name of key_pair to be granted access. Will be fetched from
         config by default, may be configured per region;

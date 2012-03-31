@@ -73,6 +73,7 @@ KEY_PAIR = regional-username
 AMI_PTRN = ubuntu/images/ebs/ubuntu-*-10.04-*-server-*
 AMI_PTRN_WITH_VERSION = ubuntu/images/ebs/ubuntu-*-{version}-*-server-*
 AMI_PTRN_WITH_RELEASE_DATE = ubuntu/images/ebs/ubuntu-*-{version}-*-server-{released_at}
+AMI_REGEXP = ^ubuntu/images/ebs/ubuntu-[a-z]+-(?P<version>\d{1,2}\.\d{2,2})-(i386|amd64)+-server-(?P<released_at>\d{8,8}(\.\d{1,1})?)$
 
 [ap-southeast-1]
 KERNELX86_64 = aki-11d5aa43
