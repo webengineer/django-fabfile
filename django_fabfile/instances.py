@@ -37,8 +37,9 @@ SNAP_TIME = config.getint('DEFAULT', 'MINUTES_FOR_SNAP') * 60
 
 
 @task
-def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
-                    security_groups='', architecture=None):
+def create_instance(
+        region_name='us-east-1', zone_name=None, key_pair=None,
+        security_groups='', architecture=None, user_data=None, inst_type=None):
     """
     Create AWS EC2 instance.
 
@@ -55,7 +56,10 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
         list of AWS Security Groups names formatted as string separated
         with semicolon ';';
     architecture
-        "i386" or "x86_64".
+        "i386" or "x86_64";
+    inst_type
+        by default will be fetched from AMI description or used
+        't1.micro' if not mentioned in the description.
     """
     conn = get_region_conn(region_name)
 
@@ -90,7 +94,8 @@ def create_instance(region_name='us-east-1', zone_name=None, key_pair=None,
     image = conn.get_all_images(filters=filters)[0]
     return launch_instance_from_ami(
         region_name, image.id, security_groups=security_groups,
-        key_pair=key_pair, zone_name=zone_name)
+        key_pair=key_pair, zone_name=zone_name, user_data=user_data,
+        inst_type=inst_type)
 
 
 @contextmanager
@@ -573,7 +578,7 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
 @task
 def launch_instance_from_ami(
     region_name, ami_id, inst_type=None, security_groups='', key_pair=None,
-    zone_name=None):
+    zone_name=None, user_data=None):
     """Create instance from specified AMI.
 
     region_name
@@ -590,11 +595,9 @@ def launch_instance_from_ami(
         name of key_pair to be granted access. Will be fetched from
         config by default, may be configured per region;
     zone_name
-        in string format."""
-    try:
-        user_data = config.get('user_data', 'USER_DATA')
-    except:
-        user_data = None
+        in string format;
+    user_data
+        string with OS configuration commands."""
     conn = get_region_conn(region_name)
     image = conn.get_all_images([ami_id])[0]
     inst_type = inst_type or get_descr_attr(image, 'Type') or 't1.micro'
@@ -606,7 +609,7 @@ def launch_instance_from_ami(
         key_name=key_pair or config.get(conn.region.name, 'KEY_PAIR'),
         security_groups=security_groups,
         instance_type=inst_type,
-        user_data=user_data,
+        user_data=user_data or config.get('user_data', 'USER_DATA'),
         placement=zone_name).instances[0]
     wait_for(inst, 'running', limit=10 * 60)
     groups = [grp.name for grp in inst.groups]

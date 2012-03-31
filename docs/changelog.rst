@@ -1,6 +1,19 @@
 Change Log
 **********
 
+Version 2012.03.31.2
+--------------------
+
+Added ``inst_type`` argument to
+:func:`django_fabfile.instances.create_instance`.
+
+Version 2012.03.31.1
+--------------------
+
+Added ``user_data`` argument to
+:func:`django_fabfile.instances.launch_instance_from_ami` and
+:func:`django_fabfile.instances.create_instance`.
+
 Version 2012.03.03.1
 --------------------
 
