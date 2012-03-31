@@ -1,6 +1,11 @@
 Change Log
 **********
 
+Version 2012.03.31.4
+--------------------
+
+Added fallback to DEFAULT section in Django settings.
+
 Version 2012.03.31.2
 --------------------
 

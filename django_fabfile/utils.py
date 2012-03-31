@@ -56,7 +56,11 @@ class Config(object):
         if os.environ.get('DJANGO_SETTINGS_MODULE'):
             try:
                 from django.conf import settings
-                return settings.FABFILE[section][option]
+                if (section in settings.FABFILE and
+                    option in settings.FABFILE[section]):
+                    return settings.FABFILE[section][option]
+                else:
+                    return settings.FABFILE['DEFAULT'][option]
             except:
                 pass
         if self.fabfile.has_section(section):
