@@ -69,6 +69,11 @@ KERNEL_ENCR_X86_64 = aki-9fa0f1da
 KEY_FILENAME = /home/username/.ssh/regional_username_rsa
 KEY_PAIR = regional-username
 
+[us-west-2]
+AMI_PTRN = ubuntu/images/ebs/ubuntu-*-10.04-*-server-*
+AMI_PTRN_WITH_VERSION = ubuntu/images/ebs/ubuntu-*-{version}-*-server-*
+AMI_PTRN_WITH_RELEASE_DATE = ubuntu/images/ebs/ubuntu-*-{version}-*-server-{released_at}
+
 [ap-southeast-1]
 KERNELX86_64 = aki-11d5aa43
 KERNELI386 = aki-13d5aa41
