@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.05.02.1
+--------------------
+
+Avoid to clone AWS read-only tags like 'aws:autoscaling:groupName'
+between instances, snapshots, etc.
+
 Version 2012.03.03.1
 --------------------
 
