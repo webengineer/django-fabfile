@@ -216,7 +216,9 @@ wait_for_sudo = WaitForProper(attempts=ssh_timeout_attempts,
 
 def add_tags(res, tags):
     for tag in tags:
-        if tags[tag]:
+        if re.match(r'^aws:.+', tag):
+            continue
+        elif tags[tag]:
             res.add_tag(tag, tags[tag])
     logger.debug('Tags added to {0}'.format(res))
 
