@@ -557,7 +557,7 @@ def mount_snapshot(region_name, snap_id, inst_id=None):
 
     info = ('\nYou may now SSH into the {inst} server, using:'
             '\n ssh -i {key} {user}@{inst.public_dns_name}')
-    with attach_snapshot(snap, inst) as (vol, mountpoint):
+    with attach_snapshot(snap, inst=inst) as (vol, mountpoint):
         if mountpoint:
             info += ('\nand browse snapshot, mounted at {mountpoint}.')
         else:
