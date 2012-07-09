@@ -624,7 +624,7 @@ def launch_instance_from_ami(
 
 
 @task
-def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
+def create_ami(region, snap_id, force=None, root_dev='/dev/sda1', zone_name=None,
                default_arch=None, default_type='t1.micro', security_groups=''):
     """
     Creates AMI image from given snapshot.
@@ -711,7 +711,7 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1',
         instance_type = get_descr_attr(snap, 'Type') or default_type
         new_instance = launch_instance_from_ami(
             region, image.id, inst_type=instance_type,
-            security_groups=security_groups)
+            security_groups=security_groups, zone_name=zone_name)
     return image, new_instance
 
 
