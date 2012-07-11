@@ -9,10 +9,8 @@ from warnings import warn
 from boto.exception import EC2ResponseError
 from fabric.api import task
 
-from django_fabfile.utils import Config, get_region_conn, timestamp
+from django_fabfile.utils import config, get_region_conn, timestamp
 
-
-config = Config()
 
 logger = logging.getLogger(__name__)
 

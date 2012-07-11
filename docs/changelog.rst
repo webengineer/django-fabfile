@@ -1,6 +1,23 @@
 Change Log
 **********
 
+Version 2012.07.11.1
+--------------------
+
+Introduced :func:`django_fabfile.utils.Config.refresh` for rereading
+configuration.
+
+Updated order of applying configuration files (next overrides settings
+from previous):
+
+=================== ===================
+        Was                 Now
+=================== ===================
+BotoConfigLocations fabfile.cfg.def
+fabfile.cfg.def     BotoConfigLocations
+fabfile.cfg         fabfile.cfg
+=================== ===================
+
 Version 2012.05.02.1
 --------------------
 

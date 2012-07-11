@@ -24,7 +24,7 @@ USERNAME = ubuntu
 [Credentials]
 # Following options will be fetched from BotoConfig (see
 # http://code.google.com/p/boto/wiki/BotoConfig for more details) if
-# left commented out below.
+# not overridden in fabfile.cfg.
 # AWS_ACCESS_KEY_ID = FILL_ME_OR_COMMENT_OUT
 # AWS_SECRET_ACCESS_KEY = FILL_ME_OR_COMMENT_OUT
 

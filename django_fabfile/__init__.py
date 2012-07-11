@@ -5,14 +5,12 @@ import sys
 
 from fabric.api import output
 
-from django_fabfile.utils import Config
+from django_fabfile.utils import config
 from django_fabfile.version import __version__
 
 
 __copyright__ = ('2010-{0}, oDesk http://www.odesk.com/. '
                  'All rights reserved.').format(date.today().year)
-
-config = Config()
 
 # Set up a specific logger with desired output level
 LOG_FORMAT = '%(asctime)-15s %(levelname)s:%(message)s'

@@ -20,12 +20,11 @@ from pkg_resources import resource_stream
 from django_fabfile import __name__ as pkg_name
 from django_fabfile.security_groups import new_security_group
 from django_fabfile.utils import (
-    Config, StateNotChangedError, add_tags, config_temp_ssh, get_descr_attr,
+    StateNotChangedError, add_tags, config, config_temp_ssh, get_descr_attr,
     get_inst_by_id, get_region_conn, get_snap_device, get_snap_instance,
     get_snap_time, timestamp, wait_for, wait_for_exists, wait_for_sudo)
 
 
-config = Config()
 USERNAME = config.get('DEFAULT', 'USERNAME')
 env.update({'user': USERNAME, 'disable_known_hosts': True})
 

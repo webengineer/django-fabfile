@@ -1,10 +1,7 @@
 from fabric.api import env, settings, sudo, abort, put, task
 from os.path import isfile as _isfile
 
-from django_fabfile.utils import Config, get_inst_by_id
-
-
-config = Config()
+from django_fabfile.utils import config, get_inst_by_id
 
 
 try:

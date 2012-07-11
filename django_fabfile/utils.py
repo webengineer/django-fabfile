@@ -47,10 +47,26 @@ class Config(object):
         return cls._instance
 
     def __init__(self):
-        self.fabfile = SafeConfigParser()
-        self.fabfile.read(BotoConfigLocations)
-        self.fabfile.readfp(resource_stream(pkg_name, 'fabfile.cfg.def'))
-        self.fabfile.read('fabfile.cfg')
+        """
+        Read configuration from listed sources.
+
+        .. versionchanged:: 2012.07.11.1
+           Updated order of applying configuration files.
+
+        .. seealso:: :doc:`changelog` for more details.
+        """
+        self.refresh()
+
+    def refresh(self):
+        """
+        Reread configuration.
+
+        .. versionadded:: 2012.07.11.1
+        """
+        self.parsed_cfg = SafeConfigParser()
+        self.parsed_cfg.readfp(resource_stream(pkg_name, 'fabfile.cfg.def'))
+        self.parsed_cfg.read(BotoConfigLocations)
+        self.parsed_cfg.read('fabfile.cfg')
 
     def _get(self, getter, section, option):
         if os.environ.get('DJANGO_SETTINGS_MODULE'):
@@ -63,10 +79,10 @@ class Config(object):
                     return settings.FABFILE['DEFAULT'][option]
             except:
                 pass
-        if self.fabfile.has_section(section):
-            return getattr(self.fabfile, getter)(section, option)
+        if self.parsed_cfg.has_section(section):
+            return getattr(self.parsed_cfg, getter)(section, option)
         else:
-            return getattr(self.fabfile, getter)('DEFAULT', option)
+            return getattr(self.parsed_cfg, getter)('DEFAULT', option)
 
     def get(self, section, option):
         return self._get('get', section, option)

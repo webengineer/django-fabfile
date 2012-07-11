@@ -1,10 +1,9 @@
 from fabric.api import env, sudo, settings, task
 from fabric.state import output
 
-from django_fabfile.utils import Config
+from django_fabfile.utils import config
 
 
-config = Config()
 master = config.get('RDBMS', 'MASTER')
 backup = config.get('RDBMS', 'BACKUP')
 username = config.get('DEFAULT', 'USERNAME')
