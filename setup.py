@@ -11,8 +11,8 @@ setup(
     version=__version__,
     description='Fabric tasks for Django and Amazon Web Services',
     install_requires=[
-        'boto>=2.2.2',
-        'Fabric>=1.2',
+        'boto>=2.4.1',
+        'Fabric>=1.4.3',
         'python-dateutil>=1.5,<2.0',
     ],
     long_description=open('README.rst').read(),
