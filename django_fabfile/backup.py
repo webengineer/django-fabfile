@@ -87,8 +87,8 @@ def create_snapshot(vol, description='', tags=None, synchronously=True,
             _user = USERNAME
         with settings(host_string=inst.public_dns_name,
                       key_filename=key_filename, user=_user):
-            wait_for_sudo('sync', shell=False)
-            run('for i in {1..20}; do sudo sync; sleep 1; done &')
+            run('sync', shell=False)
+            run('for i in {1..20}; do sync; sleep 1; done &')
 
     def initiate_snapshot():
         if consistent:
@@ -426,8 +426,8 @@ def rsync_mountpoints(src_inst, src_vol, src_mnt, dst_inst, dst_vol, dst_mnt,
                 sudo('e2label {0} {1}'.format(get_vol_dev(dst_vol), label))
             wait_for_sudo('mv /root/.ssh/authorized_keys.bak '
                           '/root/.ssh/authorized_keys')
-            wait_for_sudo('sync', shell=False)
-            wait_for_sudo('for i in {1..20}; do sync; sleep 1; done &')
+            run('sync', shell=False)
+            run('for i in {1..20}; do sync; sleep 1; done &')
 
 
 def update_snap(src_vol, src_mnt, dst_vol, dst_mnt, encr, delete_old=False):
