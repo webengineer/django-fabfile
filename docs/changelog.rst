@@ -1,6 +1,12 @@
 Change Log
 **********
 
+Version 2012.11.13.1
+--------------------
+
+Updated Ubuntu images patterns to 12.04 version in default config
+fabfile.cfg.def.
+
 Version 2012.07.11.1
 --------------------
 
