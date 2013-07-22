@@ -22,7 +22,8 @@ from django_fabfile.security_groups import new_security_group
 from django_fabfile.utils import (
     StateNotChangedError, add_tags, config, config_temp_ssh, get_descr_attr,
     get_inst_by_id, get_region_conn, get_snap_device, get_snap_instance,
-    get_snap_time, timestamp, wait_for, wait_for_exists, wait_for_sudo)
+    get_snap_time, timestamp, wait_for, wait_for_exists, wait_for_sudo,
+    copy_ami_to_regions)
 
 
 USERNAME = config.get('DEFAULT', 'USERNAME')
@@ -704,16 +705,42 @@ def create_ami(region, snap_id, force=None, root_dev='/dev/sda1', zone_name=None
 
     logger.info('The new AMI ID = {0}'.format(result))
 
-    info = ('\nEnter RUN if you want to launch instance using '
-            'just created {0}: '.format(image))
+# Commented out due to needs of unattended ami creation process
+#    info = ('\nEnter RUN if you want to launch instance using '
+#            'just created {0}: '.format(image))
     new_instance = None
-    if force == 'RUN' or raw_input(info).strip() == 'RUN':
+#    if force == 'RUN' or raw_input(info).strip() == 'RUN':
+    if force == 'RUN':
         instance_type = get_descr_attr(snap, 'Type') or default_type
         new_instance = launch_instance_from_ami(
             region, image.id, inst_type=instance_type,
             security_groups=security_groups, zone_name=zone_name)
     return image, new_instance
 
+
+@task
+def create_and_distribute_ami(region, snap_id, root_dev='/dev/sda1',
+                              default_arch=None):
+    """
+    Creates AMI image from given snapshot.
+
+    Force option removes prompt request and creates new instance from
+    created ami image.
+
+    region, snap_id
+        specify snapshot to be processed. Snapshot description in json
+        format will be used to restore instance with same parameters.
+        Will automaticaly process snapshots for same instance with near
+        time (10 minutes or shorter), but for other devices (/dev/sdb,
+        /dev/sdc, etc);
+    default_arch
+        architecture to use if not mentioned in snapshot description;
+    """
+    image = create_ami(region, snap_id, force='No')
+    copies = copy_ami_to_regions(region, image[0].id, image[0].name,
+                                image[0].description)
+    logger.info('Distributed AMI IDs = {0}'.format(copies))
+    return image, copies
 
 @task
 def create_encrypted_instance(
