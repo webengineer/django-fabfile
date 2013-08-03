@@ -309,6 +309,22 @@ def update_volumes_tags(filters=None):
                 add_tags(vol, inst.tags)
 
 
+@task
+def copy_ami_to_regions(source_region = None, image_id = None,
+                        image_name = None, image_description = None):
+    """Copies ami to all regions except source region.
+
+    :param source_region: define source region for ami.
+    """
+    images_dict = {}
+    for region in regions():
+        if region.name != source_region:
+            conn = get_region_conn(region.name)
+            copied_image = conn.copy_image(source_region, image_id,
+                                           image_name, image_description)
+            images_dict[region.name]= copied_image.image_id
+    return images_dict
+
 @contextmanager
 def config_temp_ssh(conn):
     config_name = '{region}-temp-ssh-{now}'.format(
