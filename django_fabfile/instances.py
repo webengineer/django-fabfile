@@ -227,6 +227,7 @@ def attach_snapshot(snap, key_pair=None, security_groups='', inst=None,
             volumes_to_delete.append(vol)
             dev_name = get_avail_dev(inst)
             logger.debug('Got avail {0} from {1}'.format(dev_name, inst))
+            wait_for(vol, 'available', ['status'])
             vol.attach(inst.id, dev_name)
             try:
                 wait_for(vol, 'attached', ['attach_data', 'status'])
